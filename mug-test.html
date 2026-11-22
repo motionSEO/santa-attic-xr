@@ -33,6 +33,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 await window.herbsReady; await window.mugReady; const { HerbGarden, MugModule } = window;
 
@@ -50,7 +51,7 @@ const key = new THREE.DirectionalLight(0xffc890, 2.2); key.position.set(1, 2, 1.
 scene.add(new THREE.PointLight(0xff9a50, 1.5, 4, 2).translateY(1.2));
 
 const draco = new DRACOLoader().setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/libs/draco/');
-const loadRoom = (ok, err) => window.ROOM_GLB_B64 ? new GLTFLoader().setDRACOLoader(draco).parse(Uint8Array.from(atob(window.ROOM_GLB_B64), c => c.charCodeAt(0)).buffer, '', ok, err) : new GLTFLoader().setDRACOLoader(draco).load('room.glb', ok, undefined, err);
+const loadRoom = (ok, err) => window.ROOM_GLB_B64 ? new GLTFLoader().setDRACOLoader(draco).setKTX2Loader(new KTX2Loader().setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/libs/basis/').detectSupport(renderer)).parse(Uint8Array.from(atob(window.ROOM_GLB_B64), c => c.charCodeAt(0)).buffer, '', ok, err) : new GLTFLoader().setDRACOLoader(draco).setKTX2Loader(new KTX2Loader().setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/libs/basis/').detectSupport(renderer)).load('room.glb', ok, undefined, err);
 loadRoom(gltf => {
   const mugHolder = new THREE.Group();                 // only the mug leaves the room
   mugHolder.attach(gltf.scene.getObjectByName('MugCup')); scene.add(mugHolder);
