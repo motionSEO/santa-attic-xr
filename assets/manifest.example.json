@@ -1,0 +1,22 @@
+{
+  "_설명": "이 파일을 manifest.json 으로 복사한 뒤, 받은 파일만 적어 넣으면 됩니다. 적지 않은 항목은 임시 그래픽 그대로 남아요.",
+  "models": {
+    "mortar": "assets/models/mortar.glb",
+    "pestle": "assets/models/pestle.glb",
+    "bathbomb_tree": "assets/models/bathbomb_tree.glb"
+  },
+  "fit": {
+    "mortar": "none",
+    "bathbomb_tree": "contain"
+  },
+  "images": {
+    "BookPages": "assets/ui/book_pages.webp",
+    "Parchment": "assets/ui/santa_letter.webp"
+  },
+  "sounds": {
+    "bgm": "assets/sounds/bgm.mp3",
+    "click": "assets/sounds/click.mp3",
+    "pound": "assets/sounds/pound.mp3"
+  },
+  "content": "assets/content.json"
+}

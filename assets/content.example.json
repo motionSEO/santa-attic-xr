@@ -1,0 +1,15 @@
+{
+  "intro": {
+    "title": "올해 크리스마스, 당신은 누구의 산타가 될까요?",
+    "body": ["첫 줄", "둘째 줄"]
+  },
+  "ingredients": {
+    "fairySugar": { "name": "요정설탕", "real": "베이킹 소다", "color": "#f4f1ff" }
+  },
+  "emotions": [
+    { "id": "fresh", "label": "상쾌함 · 활력", "sub": "기운 나는 하루를 선물하고 싶어요" }
+  ],
+  "recipes": {
+    "christmasTree": { "name": "크리스마스 트리", "powderDesc": "초록빛의 청량한 마법 가루" }
+  }
+}

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mug module test</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0d12;overflow:hidden;font:13px system-ui,sans-serif;color:#e8e3da}
+  #hud{position:fixed;left:12px;top:12px;padding:10px 12px;background:rgba(16,14,12,.72);border-radius:10px;line-height:1.6;pointer-events:none}
+  #hud b{color:#e0a05a}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script></head>
+<body>
+<div id="hud">
+  <b>머그컵 테스트</b><br>
+  PC: 컵을 <b>좌클릭 누르고 있으면</b> 입가로 올라와 마십니다 (떼면 제자리) · 우클릭 드래그 = 회전<br>
+  XR: 손으로 컵을 <b>꽉 쥐어</b>(주먹) 입에 가져다 대면 마십니다. 손을 펴면 놓음 · 다 마시면 저절로 다시 참<br>
+  <span id="n"></span><span id="last"></span>
+</div>
+<script>   // show any error on screen (a thrown error = black canvas)
+  const showErr = m => { const d = document.getElementById('hud'); d.style.pointerEvents = 'auto'; d.style.whiteSpace = 'pre-wrap'; d.innerHTML += '<br><span style="color:#f77">' + m + '</span>'; };
+  addEventListener('error', e => showErr(e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno));
+  addEventListener('unhandledrejection', e => showErr(String(e.reason)));
+</script>
+<script src="modules/herbs.js"></script>
+<script src="modules/mug.js"></script>
+<script src="room.glb.js" onerror="this.remove()"></script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+await window.herbsReady; await window.mugReady; const { HerbGarden, MugModule } = window;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true; renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));   // hand-tracking is in three's default optionalFeatures
+
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x14161c);
+const rig = new THREE.Group(); scene.add(rig);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.02, 50); scene.add(camera);
+scene.add(new THREE.HemisphereLight(0x8aa0c8, 0x6a4020, 0.9));
+const key = new THREE.DirectionalLight(0xffc890, 2.2); key.position.set(1, 2, 1.5); key.castShadow = true; scene.add(key);
+scene.add(new THREE.PointLight(0xff9a50, 1.5, 4, 2).translateY(1.2));
+
+const draco = new DRACOLoader().setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/libs/draco/');
+const loadRoom = (ok, err) => window.ROOM_GLB_B64 ? new GLTFLoader().setDRACOLoader(draco).parse(Uint8Array.from(atob(window.ROOM_GLB_B64), c => c.charCodeAt(0)).buffer, '', ok, err) : new GLTFLoader().setDRACOLoader(draco).load('room.glb', ok, undefined, err);
+loadRoom(gltf => {
+  const mugHolder = new THREE.Group();                 // only the mug leaves the room
+  mugHolder.attach(gltf.scene.getObjectByName('MugCup')); scene.add(mugHolder);
+  mugHolder.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+  const box = new THREE.Box3().setFromObject(mugHolder), c = box.getCenter(new THREE.Vector3());
+  const table = new THREE.Mesh(new THREE.BoxGeometry(2, 0.05, 1.2),
+    new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8 }));
+  table.position.set(c.x, box.min.y - 0.025, c.z); table.receiveShadow = true; scene.add(table);
+
+  const garden = new HerbGarden(mugHolder, scene, { colliders: [table] });   // input hub only, no herbs here
+  new MugModule(mugHolder, scene, garden, camera);
+  garden.attachHands(renderer, rig);
+  garden.enableMouse(renderer.domElement, camera);
+  window.garden = garden;
+
+  camera.position.set(c.x, c.y + 0.25, c.z + 0.5);
+  controls.target.copy(c); controls.update();
+  rig.position.set(c.x, box.min.y - 0.05, c.z + 0.6);   // VR: stand in front of the table
+
+  let last_t = performance.now();
+  renderer.setAnimationLoop(() => {
+    const now = performance.now(); garden.update((now - last_t) / 1000); last_t = now;
+    if (!renderer.xr.isPresenting) controls.update();
+    renderer.render(scene, camera);
+  });
+}, e => { console.error(e); showErr('로드/초기화 실패: ' + (e.message || e) + '\n' + (e.stack || '').split('\n').slice(0, 3).join('\n')); });
+
+const n = document.getElementById('n'), last = document.getElementById('last');
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+renderer.xr.addEventListener('sessionstart', () => { rig.add(camera); camera.position.set(0, 0, 0); camera.rotation.set(0, 0, 0); });
+renderer.xr.addEventListener('sessionend', () => scene.add(camera));
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+</script>
+</body></html>

@@ -1,0 +1,888 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Santa Attic</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:#0b0d12; overflow:hidden;
+    font:13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color:#e8e3da; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; }
+
+  #hud { position:fixed; left:16px; top:16px; z-index:16; display:flex; flex-direction:column; gap:8px;
+    max-width:min(280px, calc(100vw - 32px)); }
+  .panel { background:rgba(16,14,12,.72); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,220,180,.14); border-radius:10px; padding:10px 12px; }
+  .panel h1 { margin:0 0 8px; font-size:13px; font-weight:600; letter-spacing:.02em; color:#ffd9a8; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; }
+  button { font:inherit; color:#e8e3da; background:rgba(255,215,170,.10);
+    border:1px solid rgba(255,215,170,.22); border-radius:7px; padding:5px 9px; cursor:pointer; }
+  button:hover { background:rgba(255,215,170,.20); }
+  button[aria-pressed="true"] { background:#c2742f; border-color:#e0a05a; color:#1a1208; font-weight:600; }
+  label.slider { display:flex; align-items:center; gap:8px; margin-top:7px; font-size:12px; color:#c9c0b2; }
+  label.slider input { flex:1; accent-color:#d98c3a; }
+  label.slider b { min-width:34px; text-align:right; font-variant-numeric:tabular-nums; color:#e8e3da; font-weight:600; }
+
+  #loading { position:fixed; inset:0; z-index:20; display:grid; place-content:center; gap:14px;
+    background:#0b0d12; transition:opacity .5s ease; text-align:center; }
+  #loading.done { opacity:0; pointer-events:none; }
+  #bar { width:220px; height:3px; background:rgba(255,255,255,.12); border-radius:2px; overflow:hidden; }
+  #bar i { display:block; height:100%; width:0%; background:#d98c3a; transition:width .2s ease; }
+  #err { position:fixed; inset:auto 16px 16px; z-index:30; display:none; padding:12px 14px;
+    background:#3a1515; border:1px solid #7a3030; border-radius:10px; white-space:pre-wrap; font-size:12px; }
+
+  #toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); z-index:14; padding:7px 14px; border-radius:20px;
+    background:rgba(16,14,12,.75); color:#ffd9a8; font-size:13px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  #toast.on { opacity:1; }
+  #cross { position:fixed; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; z-index:9;
+    border-radius:50%; background:rgba(255,230,200,.85); box-shadow:0 0 0 1.5px rgba(0,0,0,.45); display:none; pointer-events:none; }
+  body.locked #cross { display:block; }
+  #start { position:fixed; inset:0; z-index:15; display:grid; place-content:center; text-align:center; gap:10px;
+    background:rgba(8,9,13,.55); cursor:pointer; }
+  #start b { font-size:17px; color:#ffd9a8; }
+  #start span { color:#c9c0b2; font-size:12px; }
+  body.locked #start, body.started #start, body.xr #start { display:none; }
+  body.locked #hud { opacity:.35; pointer-events:none; }
+  #cams, #mode, #pad { display:none !important; }
+  #pad { position:fixed; left:24px; bottom:24px; z-index:12; width:120px; height:120px; border-radius:50%;
+    border:1px solid rgba(255,215,170,.3); background:rgba(16,14,12,.35); display:none; touch-action:none; }
+  #pad i { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px; border-radius:50%;
+    background:rgba(255,215,170,.35); }
+  @media (pointer:coarse) { #pad { display:block; } #start { display:none; } }
+  @media (max-width: 640px) { #hud { left:10px; top:10px; } .panel { padding:8px 10px; } }
+#hint{position:fixed;top:14px;left:50%;transform:translateX(-50%);max-width:min(560px,90vw);padding:10px 16px;border-radius:12px;background:rgba(20,14,10,.78);color:#f3e6d3;font-size:14px;line-height:1.5;text-align:center;pointer-events:none;display:none;z-index:20}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="loading"><div style="color:#ffd9a8;font-size:14px">다락방 불러오는 중…</div><div id="bar"><i></i></div></div>
+
+<div id="hud">
+  <div class="panel">
+    <h1>Santa Attic · 1인칭</h1>
+    <div class="row" id="cams"></div>
+    <label class="slider">밝기 <input id="exp" type="range" min="0.2" max="3" step="0.05" value="1.23"><b id="expv">1.23</b></label>
+    <label class="slider">블룸 <input id="blm" type="range" min="0" max="0.8" step="0.02" value="0.16"><b id="blmv">0.16</b></label>
+    <label class="slider">조명 <input id="lit" type="range" min="0.2" max="3" step="0.05" value="1"><b id="litv">1.00</b></label>
+    <div class="row" style="margin-top:8px">
+      <button id="mode" aria-pressed="true">1인칭 걷기</button>
+      <button id="shadows" aria-pressed="true">그림자</button>
+    </div>
+    <div style="margin-top:7px;font-size:11px;color:#9c9387"><b style="color:#ffd9a8">작업대 앞 제자리에서 체험해요. 시작하면 벽난로에 불이 붙고 편지가 날아와요. 안내(화면 위)를 따라가요.</b>
+      <br>PC: 오른쪽 버튼 드래그 = 둘러보기 · 왼쪽 클릭(누른 채 끌기) = 집기/누르기 · Space = 손 동작 · R 누른 채 = 기울이기 · 휠 = 거리
+      <br>퀘스트3 손: 엄지+검지 집기 / 주먹 = 잡기 · 손가락 끝 = 책·버튼 누르기 · 멀리 있는 것은 손으로 가리키면 빛줄기가 닿고, 그때 집으면 손으로 날아오거나 서랍이 열려요
+      <br>퀘스트3 컨트롤러: 트리거 = 집기(멀리 가리키기 포함) · 그립 = 주먹 · 오른쪽 스틱 = 회전</div>
+  </div>
+</div>
+<div id="start"><b>클릭해서 시작하기</b><span>제자리에서 체험해요 · 오른쪽 버튼을 누른 채 끌면 둘러보고, 왼쪽 클릭으로 물건을 만져요</span></div>
+<div id="cross"></div>
+<div id="toast"></div>
+<div id="hint"></div>
+<div id="pad"><i></i></div>
+<pre id="err"></pre>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+  "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.8.3/build/index.module.js"
+} }
+</script>
+
+<script src="modules/herbs.js"></script>
+<script src="modules/mug.js"></script>
+<!-- room: room.glb is loaded directly (room.glb.js also works if present) -->
+<script src="room.glb.js" onerror="this.remove()"></script>
+<script type="module">
+import * as THREE from 'three';
+await window.herbsReady; await window.mugReady; const { HerbGarden, MugModule } = window;
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { computeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+const showErr = (m) => { const e = document.getElementById('err'); e.style.display='block'; e.textContent += m + '\n'; };
+window.addEventListener('error', e => showErr('⚠ ' + e.message));
+let toastT = 0;
+const toast = (m) => { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1600); };
+
+// ---------------------------------------------------------------- renderer
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.AgXToneMapping;      // matches Blender's AgX view transform
+renderer.toneMappingExposure = 1.23;              // Blender view exposure +0.3 stops = 2^0.3
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.xr.enabled = true;
+app.appendChild(renderer.domElement);
+// Quest 3: ask for hand tracking (controllers keep working too)
+document.body.appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
+renderer.xr.setFoveation?.(1);
+RectAreaLightUniformsLib.init();
+
+const scene = new THREE.Scene();
+
+// Blender world: colour (0.05, 0.07, 0.11) at strength 0.22
+const WORLD = new THREE.Color().setRGB(0.05, 0.07, 0.11, THREE.LinearSRGBColorSpace);
+scene.background = WORLD.clone().multiplyScalar(0.3);
+// cool from the snow outside, warm bounce off the timber floor - this is what makes it read cosy
+const hemi = new THREE.HemisphereLight(
+  new THREE.Color().setRGB(0.26, 0.34, 0.52, THREE.LinearSRGBColorSpace),
+  new THREE.Color().setRGB(0.52, 0.26, 0.09, THREE.LinearSRGBColorSpace), 0.7);
+scene.add(hemi);
+
+// ---------------------------------------------------------------- player (first person)
+// Desktop: the camera sits at player.feet + eye height, yaw/pitch from a right-button drag (the cursor stays free for clicking).
+// VR: the camera lives in the rig; the rig stands on player.feet and the headset pose is added on top.
+const camera = new THREE.PerspectiveCamera(68, innerWidth/innerHeight, 0.02, 120);
+scene.add(camera);
+const rig = new THREE.Group();
+scene.add(rig);
+const controls = null;            // OrbitControls retired: this build is first-person only
+let currentView = null;
+
+// Blender is Z-up, glTF is Y-up:  three = (bx, bz, -by)
+const B2T = (p) => new THREE.Vector3(p[0], p[2], -p[1]);
+
+// spawn points (eye position + look target, from the Blender cameras)
+const VIEWS = {
+  '시작 위치': { pos:[1.07, 0.0, 1.60], target:[-0.5, 0.08, 1.05] },
+  '창문':     { pos:[0.45, 0.05, 1.50], target:[-1.05, 0.03, 1.55] },
+  '벽난로':   { pos:[0.15, 0.42, 1.55], target:[-0.52, 1.45, 0.72] },
+  '옷걸이':   { pos:[1.55, 0.70, 1.45], target:[1.92, 1.98, 1.10] }
+};
+
+const P = {
+  feet: new THREE.Vector3(),       // where the player stands (desktop and VR)
+  vy: 0,                           // vertical speed (falling)
+  eye: 1.55, eyeStand: 1.55, eyeCrouch: 0.95,
+  radius: 0.2, step: 0.32, minHead: 1.05, ceil: 9, walk: 1.25, run: 2.6, gravity: 9.8
+};
+// The player stays in one spot at the work desk (no walking, no teleport): only the view turns.
+const STAND = { feet: new THREE.Vector3(1.0, 0, -0.4), yaw: Math.PI / 2, pitch: -0.95 };
+let walkMode = true;               // false = free-fly (no collision), for inspecting the scene
+let yaw = 0, pitch = 0;
+const keys = new Set();
+
+function applyLook() {
+  camera.rotation.order = 'YXZ';
+  camera.rotation.set(pitch, yaw, 0);
+}
+function placeCamera() {
+  if (renderer.xr.isPresenting) return;
+  if (walkMode) camera.position.set(P.feet.x, P.feet.y + P.eye, P.feet.z);
+  applyLook();
+}
+
+// ---- collision world: static meshes of the room, BVH-accelerated
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
+const colliders = [];
+const ray = new THREE.Raycaster();
+ray.firstHitOnly = true;
+function buildColliders(root) {
+  root.updateMatrixWorld(true);
+  const bb = new THREE.Box3(), sz = new THREE.Vector3();
+  root.traverse(o => {
+    if (!o.isMesh || !o.visible) return;
+    const mn = (Array.isArray(o.material) ? o.material[0] : o.material)?.name || '';
+    if (/^Out/.test(o.name) || /^Out/.test(mn)) return;                 // the night outside the window
+    if (/^(DecoVine_|Mistletoe_|GLBWIN_)/.test(o.name)) return;          // hanging deco / garland
+    if (/flame|bulb|glow|led|flake/i.test(mn)) return;
+    bb.setFromObject(o).getSize(sz);
+    if (Math.max(sz.x, sz.y, sz.z) < 0.25) return;                       // small props (mug, herbs, clutter) never block
+    try { if (!o.geometry.boundsTree) o.geometry.computeBoundsTree(); } catch (e) { /* plain raycast fallback */ }
+    colliders.push(o);
+  });
+  console.log('colliders:', colliders.length);
+}
+const heldByPlayer = (o) => { for (let p = o; p; p = p.parent) if (p === camera || p === rig) return true; return false; };
+function cast(origin, dir, far) {
+  ray.set(origin, dir); ray.near = 0; ray.far = far;
+  const hits = ray.intersectObjects(colliders, false);
+  for (const h of hits) if (!heldByPlayer(h.object)) return h;
+  return null;
+}
+const _n = new THREE.Vector3(), _o = new THREE.Vector3(), _d = new THREE.Vector3(), DOWN = new THREE.Vector3(0, -1, 0), UP = new THREE.Vector3(0, 1, 0);
+function hitNormal(h) {
+  if (!h.face) return _n.copy(_d).negate();
+  return _n.copy(h.face.normal).transformDirection(h.object.matrixWorld);
+}
+function floorAt(x, y, z) {          // highest walkable surface under (x, y + step, z)
+  _o.set(x, y + P.step + 0.05, z);
+  const h = cast(_o, DOWN, P.step + 4);
+  return h ? h.point.y : null;
+}
+
+// move the feet by `move` (xz), sliding along walls; returns the new feet position
+const _m = new THREE.Vector3(), _best = new THREE.Vector3();
+function walkMove(feet, move, dt) {
+  const start = feet.clone();
+  _m.copy(move); _m.y = 0;
+  const heights = [0.18 + P.step, 0.62, 0.95];          // walls/furniture; the sloped roof is handled by head room below
+  for (let it = 0; it < 3; it++) {
+    const len = _m.length(); if (len < 1e-6) break;
+    _d.copy(_m).divideScalar(len);
+    let best = null;
+    for (const hgt of heights) {
+      _o.set(feet.x, feet.y + hgt, feet.z);
+      const h = cast(_o, _d, len + P.radius);
+      if (h && (!best || h.distance < best.distance)) best = h;
+    }
+    if (!best) { feet.add(_m); break; }
+    const go = Math.max(0, best.distance - P.radius);
+    feet.addScaledVector(_d, go);
+    _best.copy(hitNormal(best)); _best.y = 0;
+    if (_best.lengthSq() < 1e-6) break;
+    _best.normalize(); if (_best.dot(_d) > 0) _best.negate();
+    _m.addScaledVector(_d, -go);                    // what is left of the move...
+    _m.addScaledVector(_best, -_m.dot(_best));      // ...slides along the wall
+  }
+  // push out of anything we ended up too close to (corners, thin posts)
+  for (const hgt of [0.45, 0.9, P.eye - 0.08]) for (let k = 0; k < 8; k++) {
+    const a = k / 8 * Math.PI * 2; _d.set(Math.cos(a), 0, Math.sin(a));
+    _o.set(feet.x, feet.y + hgt, feet.z);
+    const h = cast(_o, _d, P.radius);
+    if (h) feet.addScaledVector(_d, -(P.radius - h.distance));
+  }
+  // ground: step up small ledges, fall down otherwise; never walk off into the void
+  const fy = floorAt(feet.x, feet.y, feet.z);
+  if (fy === null) { feet.copy(start); return feet; }
+  if (fy >= feet.y - 0.01) { feet.y = fy; P.vy = 0; }
+  else { P.vy -= P.gravity * dt; feet.y = Math.max(fy, feet.y + P.vy * dt); if (feet.y === fy) P.vy = 0; }
+  // head room: the attic roof slopes down to the floor; don't walk under it
+  _o.set(feet.x, feet.y + 0.3, feet.z);
+  const up = cast(_o, UP, 2.5);
+  const clear = up ? up.distance + 0.3 : 9;
+  if (clear < P.minHead) { feet.copy(start); }         // too low even ducking: the eaves stop you
+  else P.ceil = clear;                                  // otherwise the eye ducks under it (moveStep)
+  return feet;
+}
+
+// ---- input
+const el = renderer.domElement;
+el.addEventListener('contextmenu', e => e.preventDefault());
+const startEl = document.getElementById('start');
+const locked = () => document.pointerLockElement === el;
+// PC: no pointer lock. The cursor stays free: right-drag looks around, left click interacts where the cursor is.
+startEl.addEventListener('click', () => { document.body.classList.add('started'); window.__flow?.begin(); });
+document.addEventListener('pointerlockchange', () => document.body.classList.toggle('locked', locked()));
+document.addEventListener('mousemove', e => {
+  if (!locked()) return;
+  yaw   -= e.movementX * 0.0022;
+  pitch -= e.movementY * 0.0022;
+  pitch = THREE.MathUtils.clamp(pitch, -1.5, 1.5);
+});
+// while the pointer is locked, clicks aim at the crosshair: re-send them from the screen centre
+// so herbs.js / mug.js (which pick with clientX/Y) hit what the player is looking at
+for (const type of ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'click']) {
+  window.addEventListener(type, e => {
+    if (!e.isTrusted || !locked() || e.target !== el) return;
+    e.stopImmediatePropagation();
+    const r = el.getBoundingClientRect();
+    const init = { bubbles: true, cancelable: true, composed: true, button: e.button, buttons: e.buttons,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, movementX: e.movementX, movementY: e.movementY,
+      shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, altKey: e.altKey, metaKey: e.metaKey };
+    const Ctor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+    if (Ctor === PointerEvent) Object.assign(init, { pointerId: e.pointerId, pointerType: e.pointerType, isPrimary: e.isPrimary });
+    el.dispatchEvent(new Ctor(type, init));
+  }, true);
+}
+// unlocked fallback: right-drag to look (left button stays free for plants / mug)
+let dragging = false, lastX = 0, lastY = 0, dragId = null;
+el.addEventListener('pointerdown', e => {
+  if (locked()) return;
+  if (e.pointerType === 'mouse' && e.button !== 2) return;
+  if (e.pointerType !== 'mouse' && padId !== null && e.pointerId === padId) return;
+  dragging = true; dragId = e.pointerId; lastX = e.clientX; lastY = e.clientY;
+});
+addEventListener('pointerup', e => { if (e.pointerId === dragId) { dragging = false; dragId = null; } });
+addEventListener('pointermove', e => {
+  if (!dragging || e.pointerId !== dragId || locked()) return;
+  yaw   -= (e.clientX - lastX) * 0.004;
+  pitch -= (e.clientY - lastY) * 0.004;
+  pitch = THREE.MathUtils.clamp(pitch, -1.5, 1.5);
+  lastX = e.clientX; lastY = e.clientY;
+});
+addEventListener('keydown', e => { if (e.target.tagName !== 'INPUT') keys.add(e.code); });
+addEventListener('keyup',   e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+// touch: on-screen stick (bottom left), drag anywhere else to look
+const pad = document.getElementById('pad'), knob = pad.querySelector('i');
+let padId = null; const padV = new THREE.Vector2();
+pad.addEventListener('pointerdown', e => { padId = e.pointerId; pad.setPointerCapture(e.pointerId); padMove(e); });
+pad.addEventListener('pointermove', e => { if (e.pointerId === padId) padMove(e); });
+const padEnd = e => { if (e.pointerId !== padId) return; padId = null; padV.set(0, 0); knob.style.transform = ''; };
+pad.addEventListener('pointerup', padEnd); pad.addEventListener('pointercancel', padEnd);
+function padMove(e) {
+  const r = pad.getBoundingClientRect(), R = r.width / 2;
+  padV.set((e.clientX - r.left - R) / R, (e.clientY - r.top - R) / R);
+  if (padV.length() > 1) padV.normalize();
+  knob.style.transform = `translate(${padV.x * R * 0.6}px, ${padV.y * R * 0.6}px)`;
+}
+
+const _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _mv = new THREE.Vector3();
+function inputVector() {             // x = strafe, y = forward, from keys or the touch stick
+  let x = 0, y = 0;
+  if (keys.has('KeyW') || keys.has('ArrowUp'))    y += 1;
+  if (keys.has('KeyS') || keys.has('ArrowDown'))  y -= 1;
+  if (keys.has('KeyD') || keys.has('ArrowRight')) x += 1;
+  if (keys.has('KeyA') || keys.has('ArrowLeft'))  x -= 1;
+  x += padV.x; y -= padV.y;
+  const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; }
+  return { x, y };
+}
+function moveStep(dt) {
+  if (renderer.xr.isPresenting) return;
+  if (STAND) { P.eye = P.eyeStand; placeCamera(); return; }   // fixed spot: mouse look only
+  const crouch = keys.has('KeyC') || keys.has('ControlLeft');
+  // duck automatically under rafters and the sloping roof (attic!), C = crouch on purpose
+  const target = Math.min(crouch ? P.eyeCrouch : P.eyeStand, P.ceil - 0.14);
+  P.eye = target > P.eye ? Math.min(target, P.eye + dt * 2.0) : Math.max(target, P.eye - dt * 4.0);
+  const run = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  const speed = (crouch ? 0.6 : run ? P.run : P.walk) * dt;
+  const { x, y } = inputVector();
+  if (walkMode) {
+    _fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    _right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    _mv.set(0, 0, 0).addScaledVector(_fwd, y * speed).addScaledVector(_right, x * speed);
+    if (colliders.length) walkMove(P.feet, _mv, dt); else P.feet.add(_mv);
+  } else {                                              // free fly: no collision, Q/E up/down
+    camera.getWorldDirection(_fwd); _right.crossVectors(_fwd, UP).normalize();
+    camera.position.addScaledVector(_fwd, y * speed * 1.5).addScaledVector(_right, x * speed * 1.5);
+    if (keys.has('KeyE')) camera.position.y += speed;
+    if (keys.has('KeyQ')) camera.position.y -= speed;
+  }
+  placeCamera();
+}
+
+// ---- VR: left stick walks (with the same collisions), right stick snap-turns
+let snapReady = true;
+const _head = new THREE.Vector3(), _body = new THREE.Vector3();
+function vrStep(dt) {
+  const session = renderer.xr.getSession(); if (!session) return;
+  let mx = 0, my = 0, turn = 0;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad; if (!gp || gp.axes.length < 2) continue;
+    const ax = gp.axes.length >= 4 ? gp.axes[2] : gp.axes[0], ay = gp.axes.length >= 4 ? gp.axes[3] : gp.axes[1];
+    if (src.handedness === 'left')  { mx = ax; my = ay; }
+    if (src.handedness === 'right') turn = ax;
+  }
+  const xrCam = camera;   // the user camera (child of the rig) carries the headset pose in world space
+  xrCam.getWorldPosition(_head);
+  if (Math.abs(turn) > 0.7 && snapReady) {                // rotate the rig around the head
+    const a = -Math.sign(turn) * Math.PI / 6;
+    rig.position.sub(_head).applyAxisAngle(UP, a).add(_head);
+    rig.rotation.y += a; snapReady = false;
+  } else if (Math.abs(turn) < 0.3) snapReady = true;
+  if (STAND) return;                                       // fixed spot: snap turn only, no stick walking / teleport
+  const dead = 0.15;
+  if (Math.hypot(mx, my) < dead) { mx = 0; my = 0; }
+  xrCam.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+  _right.crossVectors(_fwd, UP).normalize();
+  _mv.set(0, 0, 0).addScaledVector(_fwd, -my * P.walk * dt).addScaledVector(_right, mx * P.walk * dt);
+  // the body is under the head, wherever the player physically stands in the play space
+  _body.set(_head.x, rig.position.y, _head.z);
+  const before = _body.clone();
+  if (colliders.length) { P.eye = P.eyeStand; walkMove(_body, _mv, dt); } else _body.add(_mv);
+  rig.position.x += _body.x - before.x; rig.position.z += _body.z - before.z; rig.position.y = _body.y;
+  P.feet.copy(_body);
+  teleportStep();
+}
+
+function applyStand() {
+  const fy = colliders.length ? floorAt(STAND.feet.x, 0.3, STAND.feet.z) : null;
+  P.feet.set(STAND.feet.x, fy ?? 0, STAND.feet.z); yaw = STAND.yaw; pitch = STAND.pitch;
+  rig.position.copy(P.feet); rig.rotation.set(0, yaw, 0);
+  placeCamera();
+}
+function applyView(v) {
+  const p = B2T(v.pos), t = B2T(v.target);
+  const dir = t.clone().sub(p).normalize();
+  yaw = Math.atan2(-dir.x, -dir.z);
+  pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+  currentView = v;
+  if (walkMode) {
+    const fy = colliders.length ? floorAt(p.x, p.y - 0.4, p.z) : null;
+    P.feet.set(p.x, fy ?? Math.max(0, p.y - P.eyeStand), p.z);
+  } else camera.position.copy(p);
+  rig.position.copy(P.feet); rig.rotation.set(0, yaw, 0);
+  placeCamera();
+}
+
+// ---- hands (and triggers): pinch at nothing = aim at the floor, let go = go there
+const tpLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]),
+  new THREE.LineBasicMaterial({ color: 0xffd9a8, transparent: true, opacity: 0.8 }));
+const tpRing = new THREE.Mesh(new THREE.RingGeometry(0.13, 0.17, 32).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0xffd9a8, transparent: true, opacity: 0.85, depthWrite: false }));
+tpLine.visible = tpRing.visible = false; tpLine.frustumCulled = false; scene.add(tpLine, tpRing);
+let tpSlot = null, tpTarget = null;
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _dir = new THREE.Vector3();
+function aimRay(slot, origin, dir) {
+  const J = slot.hand.joints;
+  if (slot.isHand && J && J['wrist'] && J['index-finger-phalanx-proximal']) {
+    J['wrist'].getWorldPosition(_a); J['index-finger-phalanx-proximal'].getWorldPosition(origin);
+    dir.subVectors(origin, _a).normalize();
+    dir.y -= 0.35; dir.normalize();                         // a relaxed hand points a bit high: aim lower
+  } else {
+    slot.ctrl.getWorldPosition(origin);
+    dir.set(0, 0, -1).applyQuaternion(slot.ctrl.getWorldQuaternion(new THREE.Quaternion()));
+  }
+}
+function validFloor(p) {
+  const fy = floorAt(p.x, p.y + 0.05, p.z); if (fy === null || Math.abs(fy - p.y) > 0.06) return false;
+  if (Math.abs(fy - P.feet.y) > 0.4) return false;
+  _o.set(p.x, fy + 0.3, p.z); const up = cast(_o, UP, 2.5); if (up && up.distance + 0.3 < P.minHead) return false;
+  for (let k = 0; k < 8; k++) {                            // not inside furniture
+    const a = k / 8 * Math.PI * 2; _d.set(Math.cos(a), 0, Math.sin(a)); _o.set(p.x, fy + 0.62, p.z);
+    const h = cast(_o, _d, P.radius * 0.9); if (h) return false;
+  }
+  return true;
+}
+function teleportStep() {
+  const aims = garden ? garden.aimingHands() : [];
+  if (tpSlot && !aims.includes(tpSlot)) {                 // released: jump
+    if (tpTarget) {
+      camera.getWorldPosition(_head);
+      rig.position.x += tpTarget.x - _head.x; rig.position.z += tpTarget.z - _head.z; rig.position.y = tpTarget.y;
+      P.feet.set(tpTarget.x, tpTarget.y, tpTarget.z);
+    }
+    tpSlot = null; tpTarget = null;
+  }
+  if (!tpSlot && aims.length) tpSlot = aims[0];
+  tpLine.visible = tpRing.visible = !!tpSlot;
+  if (!tpSlot) return;
+  aimRay(tpSlot, _b, _dir);
+  const h = cast(_b, _dir, 6);
+  tpTarget = null;
+  let end = _b.clone().addScaledVector(_dir, h ? h.distance : 3);
+  if (h && hitNormal(h).y > 0.7 && validFloor(h.point)) tpTarget = h.point.clone();
+  tpLine.geometry.setFromPoints([_b.clone(), end]);
+  tpRing.position.copy(end).y += 0.01;
+  tpRing.material.color.set(tpTarget ? 0xffd9a8 : 0xd05a4a);
+  tpLine.material.color.set(tpTarget ? 0xffd9a8 : 0xd05a4a);
+}
+
+// ---- VR is a phone-class GPU: fewer lights and no shadows while in the headset
+let xrSaved = null;
+function xrQuality(on) {
+  if (on) {
+    xrSaved = { shadows: renderer.shadowMap.enabled, lights: [] };
+    renderer.shadowMap.enabled = false;
+    keptLights.forEach((l, i) => { if (i >= 8 && l.visible) { l.visible = false; xrSaved.lights.push(l); } });
+    bloom.enabled = false;
+  } else if (xrSaved) {
+    renderer.shadowMap.enabled = xrSaved.shadows; xrSaved.lights.forEach(l => l.visible = true); bloom.enabled = true; xrSaved = null;
+  }
+  scene.traverse(o => { if (o.isMesh) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m && (m.needsUpdate = true)); });
+}
+
+// hand the camera over to the rig for VR, and take it back afterwards
+renderer.xr.addEventListener('sessionstart', () => {
+  xrQuality(true);
+  document.body.classList.add('xr');
+  if (document.pointerLockElement) document.exitPointerLock();
+  rig.position.copy(P.feet); rig.rotation.set(0, yaw, 0);
+  rig.add(camera);
+  camera.position.set(0, 0, 0);
+  camera.rotation.set(0, 0, 0);
+});
+renderer.xr.addEventListener('sessionend', () => {
+  xrQuality(false); tpSlot = null; tpLine.visible = tpRing.visible = false;
+  document.body.classList.remove('xr');
+  scene.add(camera);
+  yaw = rig.rotation.y; pitch = 0;
+  placeCamera();
+});
+const camRow = document.getElementById('cams');
+if (!STAND) Object.keys(VIEWS).forEach((name, i) => {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.setAttribute('aria-pressed', i === 0 ? 'true' : 'false');
+  b.onclick = () => {
+    [...camRow.children].forEach(c => c.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    applyView(VIEWS[name]);
+  };
+  camRow.appendChild(b);
+});
+applyStand();
+
+// ---------------------------------------------------------------- post
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+// keep bloom to the actual bulbs/fire - a low threshold veils the whole room in white
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.16, 0.5, 1.15);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// ---------------------------------------------------------------- scene load
+const draco = new DRACOLoader().setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/libs/draco/');
+const loader = new GLTFLoader().setDRACOLoader(draco);
+
+const bar = document.querySelector('#bar i');
+// glTF hands Blender's watts over as candela, which is orders of magnitude too hot for
+// three's physical lights. This factor was measured against the Blender renders.
+const BASE_LIGHT_SCALE = 0.00002;
+let LIGHT_SCALE = BASE_LIGHT_SCALE;
+let shadowCasters = [], keptLights = [], rectLights = [];
+const fireFx = { light: null, tick: null, snow: null, halos: [] };
+const pineLights = [];
+const swayT = { value: 0 };
+let garden = null, flow = null;
+const fireLevel = { k: 1 };
+function onRoom(gltf) {
+  const root = gltf.scene;
+  scene.add(root);
+
+  // glTF brings the punctual lights in; thin them out so the shader stays sane
+  const lights = [];
+  // stray lights floating mid-room (they paint hot blobs/streaks on the floor)
+  const STRAY = /^(FireGlow|FloorWarm|Light)$/;
+  root.traverse(o => { if (o.isLight && !STRAY.test(o.name)) lights.push(o); });
+  root.traverse(o => { if (o.isLight && STRAY.test(o.name)) o.visible = false; });
+  lights.sort((a, b) => b.intensity - a.intensity);
+  // glTF hands over Blender's watts as candela, which blows out under three's AgX.
+  // One global scale brings it back to the Blender look; tune with the 조명 slider.
+  lights.forEach((l, i) => {
+    if (i >= 18) { l.parent.remove(l); return; }   // keep the christmas strings alive
+    if (l.name === 'DaySun') l.intensity *= 0.25;   // darker night outside
+    l.userData.baseIntensity = l.intensity;
+    l.intensity *= LIGHT_SCALE;
+    l.castShadow = i < 2;                       // only the hearth and the desk spot cast
+    if (l.castShadow) {
+      l.shadow.mapSize.set(1024, 1024);
+      l.shadow.bias = -0.0012;
+      l.shadow.normalBias = 0.02;
+      if (l.shadow.camera.far !== undefined) l.shadow.camera.far = 12;
+      shadowCasters.push(l);
+    }
+    keptLights.push(l);
+  });
+
+  // Blender area lights are not part of KHR_lights_punctual - rebuild them here
+  const AREA = [
+    { pos:[0.3362,-1.065,2.109], dir:[-0.1534,-0.179,-0.9718], w:1.5, h:0.25, watts:6.5 },
+    { pos:[-1.02, 0.948,0.825],  dir:[-0.0797, 0.0,  0.9968],  w:1.2, h:0.25, watts:4.5 }
+  ];
+  for (const a of AREA) {
+    const L = new THREE.RectAreaLight(new THREE.Color().setRGB(1.0, 0.72, 0.5, THREE.LinearSRGBColorSpace),
+                                      a.watts * 0.86, a.w, a.h);
+    L.position.copy(B2T(a.pos));
+    L.lookAt(B2T(a.pos).add(B2T(a.dir)));
+    L.userData.baseIntensity = L.intensity;
+    rectLights.push(L);
+    scene.add(L);
+  }
+
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    if (/^Hang(Bag|Coat|Hat|Scarf)/.test(o.name)) { o.visible = false; return; }  // clear the coat rack
+    o.castShadow = true; o.receiveShadow = true;
+    o.frustumCulled = true;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) {
+      if (!m) continue;
+      if (m.map) {
+        m.map.anisotropy = 4;
+        // the baked albedo is flat and pale - a warm tint multiplies into it so the
+        // room reads like candlelight instead of a white box
+        if (/^BK_/.test(m.name)) m.color.setRGB(0.95, 0.80, 0.63, THREE.LinearSRGBColorSpace);
+      }
+      // thin cloth, leaves and paper read better lit from both sides
+      if (/leaf|vine|curtain|fir|plant|scarf|coat|snow|flame|ribbon/i.test(m.name)) m.side = THREE.DoubleSide;
+      if (m.name === 'OutSky') { m.color.multiplyScalar(0.12); if (m.emissive) m.emissiveIntensity = 0; }   // replaced by the gradient shader below
+      if (m.name === 'OutSnow') {          // moonlit snow: dim blue-white (was too dark -> black ground and black tree tops)
+        m.color.setRGB(0.5, 0.6, 0.8, THREE.LinearSRGBColorSpace);
+        m.emissive.setRGB(0.09, 0.13, 0.24, THREE.LinearSRGBColorSpace); m.emissiveIntensity = 1;   // well under the bloom threshold
+      }
+      if (m.name === 'OutPine') m.emissive.setRGB(0.012, 0.06, 0.08, THREE.LinearSRGBColorSpace);
+      if (/glass/i.test(m.name)) {        // window + lantern glass: see through it
+        m.transparent = true; m.depthWrite = false; m.side = THREE.DoubleSide;
+        m.roughness = Math.min(m.roughness, 0.08); m.metalness = 0;
+        if (m.opacity > 0.4) m.opacity = 0.14;
+        if (m.name === 'GlassClear') { m.color.set(0x0a1424); m.opacity = 0.1; m.roughness = 0.02; m.envMapIntensity = 0; }  // window pane
+        o.castShadow = false;
+      }
+      if (/flame|bulb|glow|led/i.test(m.name) && m.emissive) m.emissiveIntensity = Math.max(m.emissiveIntensity, 2.0);
+    }
+  });
+
+  // stylized fireplace flame: flat-shaded layered tongues (unlit, bloom-friendly) + embers + flickering light
+  // the 'Fire' node is the whole fireplace; the logs are three of its children (their local y is ~ -1)
+  const fireNode = root.getObjectByName('Fire'); root.updateMatrixWorld(true);
+  const logBox = new THREE.Box3();
+  fireNode.children.filter(c => /^Cube.?(005|016|021)$/.test(c.name)).forEach(c => logBox.expandByObject(c));
+  const fp = logBox.getCenter(new THREE.Vector3()); fp.y = logBox.max.y - 0.02;
+  const fireScale = THREE.MathUtils.clamp(Math.max(logBox.getSize(new THREE.Vector3()).x, logBox.getSize(new THREE.Vector3()).z) / 0.5, 0.5, 1.5);
+  console.log('fire at', fp.toArray(), 'logs', logBox.min.toArray(), logBox.max.toArray());
+  fireFx.light = new THREE.PointLight(0xff7a2a, 1.6, 6, 2);
+  fireFx.light.position.copy(fp).y += 0.2;
+  scene.add(fireFx.light);
+  const prof = [[0,0],[.5,.04],[.62,.25],[.42,.55],[.2,.82],[0,1]].map(([r,y]) => new THREE.Vector2(r, y));
+  const flameGeo = new THREE.LatheGeometry(prof, 10);
+  const layers = [[0xff3d10, 1.0], [0xff9a1e, 0.72], [0xffe27a, 0.42]].map(([c, k]) => {
+    const col = new THREE.Color(c).multiplyScalar(1.5);       // >1 so the bloom pass picks it up
+    return { k, mat: new THREE.MeshBasicMaterial({ color: col, toneMapped: false }) };
+  });
+  const flame = new THREE.Group(); flame.position.copy(fp); flame.scale.setScalar(fireScale); scene.add(flame);
+  fireFx.setLevel = (k) => { fireLevel.k = k; flame.scale.setScalar(fireScale * Math.max(0.05, k)); flame.visible = k > 0.02; embers.visible = k > 0.3; };
+  const tongues = [[0,0,.2,1],[.07,.03,.15,.8],[-.07,-.02,.16,.85],[.03,-.07,.12,.65],[-.04,.07,.13,.7]];
+  for (const [x, z, w, h] of tongues) {
+    const t = new THREE.Group(); t.position.set(x, 0, z); t.userData = { w, h, ph: Math.random() * 6.28 };
+    for (const L of layers) { const m = new THREE.Mesh(flameGeo, L.mat); m.scale.set(w * L.k, 0.3 * h * L.k, w * L.k); t.add(m); }
+    flame.add(t);
+  }
+  const N = 14, ePos = new Float32Array(N * 3), eSeed = Array.from({ length: N }, () => Math.random());
+  const eGeo = new THREE.BufferGeometry(); eGeo.setAttribute('position', new THREE.BufferAttribute(ePos, 3));
+  const embers = new THREE.Points(eGeo, new THREE.PointsMaterial({ color: new THREE.Color(0xffb040).multiplyScalar(1.6), size: 0.012, toneMapped: false, transparent: true, depthWrite: false }));
+  embers.frustumCulled = false; scene.add(embers);
+  fireFx.tick = (t) => {
+    flame.children.forEach((g, i) => {
+      const u = g.userData, n = Math.sin(t*9 + u.ph) * .5 + Math.sin(t*17.3 + u.ph*2) * .5;
+      g.scale.set(1 + n*.08, 1 + n*.22, 1 + n*.08);
+      g.rotation.z = Math.sin(t*3 + u.ph) * .12; g.rotation.x = Math.cos(t*2.6 + u.ph) * .12;
+    });
+    for (let i = 0; i < N; i++) {
+      const k = (t * 0.35 + eSeed[i]) % 1;
+      ePos[i*3]   = fp.x + (eSeed[i] - .5) * .2 + Math.sin(t*2 + i) * .03 * k;
+      ePos[i*3+1] = fp.y + 0.05 + k * 0.7;
+      ePos[i*3+2] = fp.z + (((eSeed[i] * 7) % 1) - .5) * .2;
+    }
+    eGeo.attributes.position.needsUpdate = true;
+  };
+
+  // hanging plants sway: world-space vertex offset, strongest at the free end below the anchor
+  root.traverse(o => {
+    if (!o.isMesh || !/^(DecoVine_|Mistletoe_)/.test(o.name)) return;
+    const anchor = new THREE.Box3().setFromObject(o).max.y;
+    o.material = o.material.clone();
+    o.material.onBeforeCompile = (sh) => {
+      sh.uniforms.uT = swayT; sh.uniforms.uAnchor = { value: anchor };
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float uT; uniform float uAnchor;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
+          float k = clamp((uAnchor - wp.y) / 0.4, 0.0, 1.0); k *= k;
+          transformed += vec3(sin(uT*1.4 + wp.y*3.0 + wp.x*2.0), 0.0, cos(uT*1.1 + wp.y*2.5 + wp.z*2.0)) * 0.025 * k;`);
+    };
+  });
+
+
+  // snow: baked far flakes (OutFlake) looked like rain streaks -> hidden; round soft dots fall outside the window instead
+  root.traverse(o => { if (o.isMesh && o.material && o.material.name === 'OutFlake') o.visible = false; });
+  // ---- night outside: gradient sky + stars, warm fairy lights in the pines, two layers of falling snow
+  // stylised pine: trunk + 5 stacked cones, each with a snow cap of the same slope, + fairy lights on the surface
+  const pineMat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(0.03, 0.11, 0.10, THREE.LinearSRGBColorSpace), roughness: 0.9, flatShading: true,
+    emissive: new THREE.Color().setRGB(0.01, 0.05, 0.07, THREE.LinearSRGBColorSpace) });
+  const pineSnowMat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(0.5, 0.6, 0.8, THREE.LinearSRGBColorSpace), roughness: 0.9, flatShading: true,
+    emissive: new THREE.Color().setRGB(0.09, 0.13, 0.24, THREE.LinearSRGBColorSpace) });
+  const trunkMat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(0.05, 0.03, 0.02, THREE.LinearSRGBColorSpace), roughness: 1 });
+  function buildPine(x, y0, z, H, R) {
+    const g = new THREE.Group(); g.position.set(x, y0, z); g.rotation.y = Math.random() * 6.28;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.07, R * 0.1, H * 0.16, 6), trunkMat); trunk.position.y = H * 0.08; g.add(trunk);
+    const N = 5;
+    for (let i = 0; i < N; i++) {
+      const f = i / N, r = R * (1 - f * 0.72), h = H * 0.34, y = H * 0.1 + f * H * 0.62;
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(r, h, 9), pineMat); cone.position.y = y + h / 2; cone.rotation.y = i;
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(r * 0.58, h * 0.55, 9), pineSnowMat); cap.position.y = y + h + 0.01 - h * 0.275; cap.rotation.y = i;
+      g.add(cone, cap);
+      for (let k = 0; k < 5; k++) {                       // fairy lights on this tier's surface, in world space
+        const t = 0.15 + Math.random() * 0.7, ang = Math.random() * 6.28, rad = r * (1 - t) * 1.02;
+        const p = new THREE.Vector3(Math.cos(ang) * rad, y + t * h, Math.sin(ang) * rad).applyEuler(g.rotation).add(g.position);
+        pineLights.push(p.x, p.y, p.z);
+      }
+    }
+    scene.add(g);
+  }
+
+  const dc = document.createElement('canvas'); dc.width = dc.height = 32;
+  const dg = dc.getContext('2d'), dr = dg.createRadialGradient(16,16,0,16,16,16);
+  dr.addColorStop(0,'rgba(255,255,255,1)'); dr.addColorStop(1,'rgba(255,255,255,0)'); dg.fillStyle = dr; dg.fillRect(0,0,32,32);
+  const dotTex = new THREE.CanvasTexture(dc);
+  root.traverse(o => {
+    if (o.name === 'OutBackdrop') o.material = new THREE.ShaderMaterial({
+      uniforms: { uT: swayT }, depthWrite: false,
+      vertexShader: 'varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+      fragmentShader: `varying vec3 vW; uniform float uT;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        void main(){
+          float k = smoothstep(-2.0, 28.0, vW.y);
+          vec3 c = mix(vec3(0.030, 0.060, 0.150), vec3(0.003, 0.007, 0.028), k);
+          vec2 cell = floor(vW.zy * 5.0); float r = h(cell);
+          float star = step(0.985, r) * (0.5 + 0.5 * sin(uT * 2.0 + r * 40.0)) * smoothstep(6.0, 18.0, vW.y);
+          gl_FragColor = vec4(c + vec3(0.35, 0.4, 0.55) * star * 0.5, 1.0);
+        }`
+    });
+    if (/^OutPine(Snow)?\d+$/.test(o.name)) o.visible = false;   // the old blobby cones are replaced by tiered snowy pines below
+    if (/^OutPine\d+$/.test(o.name)) {
+      const bb = new THREE.Box3().setFromObject(o), sz = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+      buildPine(c.x, bb.min.y, c.z, sz.y * 2.4, sz.x * 0.5 * 2.2);
+    }
+  });
+  const plG = new THREE.BufferGeometry(); plG.setAttribute('position', new THREE.Float32BufferAttribute(pineLights, 3));
+  const pl = new THREE.Points(plG, new THREE.PointsMaterial({ map: dotTex, color: new THREE.Color(1.0, 0.7, 0.32).multiplyScalar(0.85), size: 0.3, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  pl.frustumCulled = false; scene.add(pl);
+  const snowLayers = [   // [count, xRange, yRange, zRange, dotSize, fallSpeed, opacity]
+    [1400, [-6, -1.25], [-1, 4], [-3.5, 3.5], 0.03, 0.3, 0.85],
+    [1800, [-26, -6],   [-1, 11], [-14, 14],  0.16, 0.9, 0.6]
+  ].map(([N, X, Y, Z, size, v, op]) => {
+    const P = new Float32Array(N * 3), S = new Float32Array(N);
+    for (let i = 0; i < N; i++) { P[i*3] = X[0] + Math.random() * (X[1]-X[0]); P[i*3+1] = Y[0] + Math.random() * (Y[1]-Y[0]);
+      P[i*3+2] = Z[0] + Math.random() * (Z[1]-Z[0]); S[i] = v * (0.6 + Math.random() * 0.8); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+    const pts = new THREE.Points(g, new THREE.PointsMaterial({ map: dotTex, color: 0x9fb0d8, size, transparent: true, depthWrite: false, opacity: op }));
+    pts.frustumCulled = false; scene.add(pts); return { N, P, S, g, Y };
+  });
+  fireFx.snow = (t, dt) => {
+    for (const L of snowLayers) {
+      for (let i = 0; i < L.N; i++) {
+        let y = L.P[i*3+1] - L.S[i] * dt; if (y < L.Y[0]) y = L.Y[1];
+        L.P[i*3+1] = y; L.P[i*3] += Math.sin(t * 0.8 + i) * 0.12 * dt;
+      }
+      L.g.attributes.position.needsUpdate = true;
+    }
+  };
+
+  // mist: light exponential fog (far trees melt into the horizon colour; the room is barely touched)
+  // + a few big soft sprites drifting low outside the window
+  scene.fog = new THREE.FogExp2(new THREE.Color().setRGB(0.04, 0.075, 0.17, THREE.LinearSRGBColorSpace), 0.04);
+  const mist = [];
+  for (let i = 0; i < 14; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, color: new THREE.Color().setRGB(0.10, 0.16, 0.30, THREE.LinearSRGBColorSpace),
+      transparent: true, opacity: 0.16 + Math.random() * 0.08, depthWrite: false, fog: false }));
+    sp.position.set(-4 - Math.random() * 16, 0.3 + Math.random() * 2.2, (Math.random() - .5) * 18);
+    sp.scale.set(6 + Math.random() * 6, 2 + Math.random() * 1.5, 1); sp.userData = { sp: 0.15 + Math.random() * 0.25, ph: Math.random() * 6.28 };
+    scene.add(sp); mist.push(sp);
+  }
+  const snowTick = fireFx.snow;
+  fireFx.snow = (t, dt) => {
+    snowTick(t, dt);
+    for (const m of mist) { m.position.z += m.userData.sp * dt; if (m.position.z > 10) m.position.z = -10; m.position.y += Math.sin(t * 0.3 + m.userData.ph) * 0.1 * dt; }
+  };
+
+  // window garland: shrink the bare bulbs, tone them down, and give each a soft halo instead of a hard glare
+  root.traverse(o => {
+    if (!o.isMesh || !/^GLBWIN_.*Bulb/.test(o.name)) return;
+    o.updateWorldMatrix(true, false);
+    const gp = o.geometry.attributes.position, thr = 0.022 / o.getWorldScale(new THREE.Vector3()).x, cl = [];
+    const v = new THREE.Vector3(), owner = new Int32Array(gp.count);
+    for (let i = 0; i < gp.count; i++) {
+      v.fromBufferAttribute(gp, i); let k = cl.findIndex(c => c.c.distanceTo(v) < thr);
+      if (k < 0) { cl.push({ c: v.clone(), n: 1 }); k = cl.length - 1; } else { const c = cl[k]; c.c.multiplyScalar(c.n).add(v).multiplyScalar(1 / ++c.n); }
+      owner[i] = k;
+    }
+    for (let i = 0; i < gp.count; i++) { const c = cl[owner[i]].c; v.fromBufferAttribute(gp, i).sub(c).multiplyScalar(0.6).add(c); gp.setXYZ(i, v.x, v.y, v.z); }
+    gp.needsUpdate = true;
+    o.material = o.material.clone(); o.material.emissiveIntensity = 1.3;
+    for (const c of cl) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, color: new THREE.Color(1.0, 0.68, 0.3), transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending }));
+      sp.position.copy(o.localToWorld(c.c.clone())); sp.scale.setScalar(0.12); sp.userData.ph = Math.random() * 6.28;
+      scene.add(sp); fireFx.halos.push(sp);
+    }
+  });
+
+  // soft warm fill: two low, wide lamps (no shadows) so shadows/contrast stay intact
+  for (const p of [[0.3, 1.8, 0.3], [-0.4, 1.7, -0.7]]) {
+    const w = new THREE.PointLight(0xffa860, 1.1, 7, 2);
+    w.position.set(...p); scene.add(w);
+  }
+
+  if (HerbGarden) try {   // herbs.js: edit there, both pages follow
+    let picked = 0;
+    garden = new HerbGarden(root, scene, { colliders: [root], onHarvest: (label) => toast(`${label} 채취 · ${++picked}개`) });
+    garden.attachHands(renderer, rig);
+    garden.enableMouse(renderer.domElement, camera, 0);   // desktop: left button (crosshair while locked) on a plant/mug
+    if (MugModule) window.__mug = new MugModule(root, scene, garden, camera);
+    window.__garden = garden;   // mug.js: cocoa, steam, drink at the mouth
+  } catch (e) { garden = null; console.error(e); showErr('herbs: ' + e.message); }
+
+  const box = new THREE.Box3().setFromObject(root);
+  window.__dbg = { THREE, scene, root, camera, renderer, composer, box, lights, P, colliders, setLook: (y, p = 0) => { yaw = y; pitch = p; },
+    sim: (y, sec, key = 'KeyW') => { yaw = y; keys.add(key); for (let i = 0; i < sec * 60; i++) moveStep(1 / 60); keys.delete(key); return [P.feet.x, P.feet.y, P.feet.z, P.eye].map(v => +v.toFixed(2)); } };
+  buildColliders(root);
+  applyStand();    // stand on the real floor now that it exists
+  document.getElementById('loading').classList.add('done');
+  // the experience: letter at the fireplace -> recipe book -> make a bath bomb -> wrap -> letter -> send
+  import('./modules/flow.js').then(({ startFlow }) => {
+    flow = startFlow({ scene, root, camera, renderer, rig, garden, canvas: renderer.domElement, toast, P, cast,
+      hintEl: document.getElementById('hint'), fire: { setLevel: (k) => fireFx.setLevel?.(k) } });
+    window.__flow = flow;
+  }).catch(e => { console.error(e); showErr('flow: ' + e.message); });
+}
+const onRoomErr = (e) => { showErr('GLB 로드 실패: ' + (e?.message || e) + '\n→ room.glb.js (또는 room.glb) 파일이 index.html 옆에 있어야 해요.');
+  document.getElementById('loading').classList.add('done'); };
+if (window.ROOM_GLB_B64) loader.parse(Uint8Array.from(atob(window.ROOM_GLB_B64), c => c.charCodeAt(0)).buffer, '', onRoom, onRoomErr);
+else loader.load('room.glb', onRoom, (ev) => { if (ev.total) bar.style.width = (100 * ev.loaded / ev.total) + '%'; }, onRoomErr);
+
+// ---------------------------------------------------------------- ui
+const expEl = document.getElementById('exp'), expV = document.getElementById('expv');
+expEl.oninput = () => { renderer.toneMappingExposure = +expEl.value; expV.textContent = (+expEl.value).toFixed(2); };
+const blmEl = document.getElementById('blm'), blmV = document.getElementById('blmv');
+blmEl.oninput = () => { bloom.strength = +blmEl.value; blmV.textContent = (+blmEl.value).toFixed(2); };
+const litEl = document.getElementById('lit'), litV = document.getElementById('litv');
+litEl.oninput = () => {
+  const mult = +litEl.value;
+  LIGHT_SCALE = BASE_LIGHT_SCALE * mult;
+  litV.textContent = mult.toFixed(2);
+  keptLights.forEach(l => l.intensity = l.userData.baseIntensity * LIGHT_SCALE);
+  rectLights.forEach(l => l.intensity = l.userData.baseIntensity * mult);
+};
+const modeBtn = document.getElementById('mode');
+modeBtn.onclick = () => {
+  walkMode = !walkMode;
+  modeBtn.textContent = walkMode ? '1인칭 걷기' : '자유 비행';
+  modeBtn.setAttribute('aria-pressed', String(walkMode));
+  if (walkMode) { const fy = colliders.length ? floorAt(camera.position.x, camera.position.y - P.eye, camera.position.z) : null;
+    if (fy !== null) P.feet.set(camera.position.x, fy, camera.position.z); }
+  placeCamera();
+};
+const shBtn = document.getElementById('shadows');
+shBtn.onclick = () => {
+  const on = renderer.shadowMap.enabled = !renderer.shadowMap.enabled;
+  shBtn.setAttribute('aria-pressed', String(on));
+  shadowCasters.forEach(l => l.castShadow = on);
+  scene.traverse(o => { if (o.isMesh) o.material && (Array.isArray(o.material) ? o.material : [o.material])
+    .forEach(m => m && (m.needsUpdate = true)); });
+};
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+let _last = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now(), dt = Math.min((now - _last) / 1000, 0.1); _last = now;
+  if (renderer.xr.isPresenting) vrStep(dt); else moveStep(dt);
+  garden?.update(dt);
+  try { flow?.update(dt, now / 1000); } catch (e) { console.error(e); }
+  if (fireFx.light) {
+    const t = now / 1000;
+    fireFx.light.intensity = (1.6 + Math.sin(t*13)*.25 + Math.sin(t*31.7)*.2 + (Math.random()-.5)*.15) * fireLevel.k;
+    fireFx.tick?.(t);
+  }
+  swayT.value = now / 1000; fireFx.snow?.(now / 1000, dt);
+  for (const h of fireFx.halos) h.material.opacity = 0.4 + Math.sin(now / 1000 * 1.5 + h.userData.ph) * 0.08;   // gentle twinkle
+  // EffectComposer does not work in WebXR - draw straight to the headset
+  if (renderer.xr.isPresenting) renderer.render(scene, camera);
+  else composer.render();
+});
+</script>
+</body>
+</html>
