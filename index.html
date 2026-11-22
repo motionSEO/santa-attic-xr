@@ -1049,7 +1049,7 @@ function onRoom(gltf) {
   }
   if (HerbGarden) try {   // herbs.js: edit there, both pages follow
     let picked = 0;
-    garden = new HerbGarden(root, scene, { colliders: [root], onHarvest: (label) => toast(`${label} 채취 · ${++picked}개`) });
+    garden = new HerbGarden(root, scene, { colliders: [root], onHarvest: (label, k, it) => toast(`${label} ${it?.count || 1}개 채취 · 모두 ${picked += (it?.count || 1)}개`) });
     garden.attachHands(renderer, rig);
     garden.enableMouse(renderer.domElement, camera, 0);   // desktop: left button on a plant/mug; right-drag = look
     if (MugModule) window.__mug = new MugModule(root, scene, garden, camera);   // mug.js: cocoa, steam, drink at the mouth

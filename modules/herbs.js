@@ -52,6 +52,25 @@ window.herbsReady = Promise.all([
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals(); return g;
   })();
 
+  // one pick = a small bunch: 2-3 leaves / petals / sprigs fanned out, built as ONE mesh so it is held, dropped and
+  // put in the mortar like a single piece
+  const BUNCH_MIN = 2, BUNCH_MAX = 3;
+  const bunchCache = new Map();
+  const bunchGeo = (kind, n) => {
+    const key = kind + n; if (bunchCache.has(key)) return bunchCache.get(key);
+    const src = (kind === 'sprig' ? sprigGeo : GEO[kind]).toNonIndexed(), pos = [], nrm = [], m = new THREE.Matrix4(), q = new THREE.Quaternion();
+    if (!src.attributes.normal) src.computeVertexNormals();
+    for (let i = 0; i < n; i++) {
+      const a = (i - (n - 1) / 2) * 0.55;                                   // fan around the stem end
+      q.setFromEuler(new THREE.Euler(0.25 * i, i * 2.1, a));
+      m.compose(new THREE.Vector3((i - (n - 1) / 2) * 0.006, 0, (i % 2 ? 0.004 : -0.004)), q, new THREE.Vector3(1, 1, 1));
+      const g = src.clone().applyMatrix4(m);
+      pos.push(...g.attributes.position.array); nrm.push(...g.attributes.normal.array);
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    g.computeBoundingSphere(); bunchCache.set(key, g); return g;
+  };
+
   const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _box = new THREE.Box3();
   const DOWN = new THREE.Vector3(0, -1, 0);
 
@@ -140,12 +159,12 @@ window.herbsReady = Promise.all([
 
     harvest(p, at) {
       const herb = HERBS[p.herb];
-      const geo = herb.kind === 'sprig' ? sprigGeo : GEO[herb.kind];
-      const mesh = new THREE.Mesh(geo, this.mats[p.herb]);
+      const count = BUNCH_MIN + Math.floor(Math.random() * (BUNCH_MAX - BUNCH_MIN + 1));
+      const mesh = new THREE.Mesh(bunchGeo(herb.kind, count), this.mats[p.herb]);
       mesh.castShadow = true; mesh.name = 'Harvest_' + p.herb;
       mesh.position.copy(at); mesh.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
       this.scene.add(mesh);
-      const it = { mesh, herb: p.herb, held: null };
+      const it = { mesh, herb: p.herb, held: null, count };
       this.items.push(it);
       if (this.items.length > 60) { const old = this.items.find(i => !i.held); if (old) this.removeItem(old); }
       p.wiggle = 1;

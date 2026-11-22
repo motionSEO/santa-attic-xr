@@ -483,10 +483,7 @@ export class Flow {
     }
     this.basket = this.make('basket', PH.basket); this.basket.position.copy(L.basket); G.add(this.basket);
     this.fruits = {};
-    [['bergamot', -0.035], ['lemon', 0.035]].forEach(([id, dz]) => {
-      const f = this.make('fruit_' + id, () => PH.fruit(id)); f.position.set(L.basket.x, DESK_Y + 0.012, L.basket.z + dz); G.add(f);
-      f.userData.ing = id; this.fruits[id] = f;
-    });
+    [['bergamot', -0.035], ['lemon', 0.035]].forEach(([id, dz]) => this.spawnFruit(id, dz, false));
     const fir = this.make('firPot', PH.firPot); fir.position.copy(L.firPot); G.add(fir);
     const firPlant = fir.userData.placeholder.userData.plant; if (firPlant && this.garden) this.garden.addPlant(firPlant, 'fir');
     // drawers of the bookcase: each holds one ingredient
@@ -530,11 +527,20 @@ export class Flow {
     this.grab(this.mortar, { modes: ['fist', 'pinch'], reach: 0.05, enabled: false });
     for (const b of Object.values(this.bottles)) this.grab(b, { modes: ['fist', 'pinch'], reach: 0.04 });
     for (const f of Object.values(this.fruits)) this.grab(f, { modes: ['pinch', 'fist'], reach: 0.04 });
+    this.fruitDz = { bergamot: -0.035, lemon: 0.035 };
     // the herb garden tells us when a picked leaf/petal is let go: into the mortar?
     if (this.garden) this.garden.onItemDrop = (it) => this.onHerbDrop(it);
     // VR: point at something out of reach and pinch -> drawers open, buttons press (herbs.js draws the hand ray)
     if (this.garden) { this.garden.rayTargets = () => this.clickables(); this.garden.onRayPick = (h, slot) => this.clickHit(h, slot); }
     if (this.garden) { this.garden.blockers.push(this.pages.mesh); }
+  }
+
+  // a whole fruit in the basket (again after one was cut: free play, the basket never runs out)
+  spawnFruit(id, dz = this.fruitDz?.[id] ?? 0, grab = true) {
+    const f = this.make('fruit_' + id, () => PH.fruit(id)); f.position.set(L.basket.x, DESK_Y + 0.012, L.basket.z + dz); this.group.add(f);
+    f.userData.ing = id; this.fruits[id] = f;
+    if (grab) { this.grab(f, { modes: ['pinch', 'fist'], reach: 0.04 }); const s0 = f.scale.clone(); f.scale.setScalar(0.01); this.tween(0.5, k => f.scale.copy(s0).multiplyScalar(Math.max(0.01, ease.back(k)))); }
+    return f;
   }
 
   // ---------------------------------------------------------------- grabbing (XR hands/controllers + mouse)
@@ -786,7 +792,23 @@ export class Flow {
     }
     this.noticePanel.set({ title, body, warn }); this.noticeT = warn ? 2.6 : 1.8;
   }
-  warn(title, body) { this.notice(title, body, true); this.sfx('wrong'); if (!this.renderer.xr.isPresenting) this.toast(title); }
+  warn(title, body) { this.sfx('wrong'); if (this.renderer.xr.isPresenting) this.notice(title, body, true); else this.domWarn(title, body); }   // VR: card in front of the eyes, PC: red card on screen
+  warnWrong(id) {           // a wrong ingredient at the mortar: the same red card every time (PC: on screen, VR: in front of the eyes)
+    if (performance.now() - (this.wrongAt || 0) < 900) return; this.wrongAt = performance.now();   // pouring calls this every second
+    this.warn('맞지 않는 재료입니다.', ING[id] ? `${ING[id].name}${josa(ING[id].name, '은', '는')} 이번 레시피에 들어가지 않아요` : '');
+  }
+  domWarn(title, body = '') {
+    let el = document.getElementById('warnCard');
+    if (!el) {
+      el = document.createElement('div'); el.id = 'warnCard';
+      el.style.cssText = 'position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:25;min-width:min(340px,86vw);max-width:90vw;padding:16px 22px;border-radius:14px;' +
+        'background:rgba(150,28,28,.94);border:2px solid #ffb3a8;color:#fff;text-align:center;pointer-events:none;opacity:0;transition:opacity .25s;box-shadow:0 8px 30px rgba(0,0,0,.45)';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '<div style="font-size:20px;font-weight:700"></div><div style="font-size:14px;margin-top:6px;color:#ffe9e2"></div>';
+    el.children[0].textContent = title; el.children[1].textContent = body; el.children[1].style.display = body ? '' : 'none';
+    el.style.opacity = '1'; clearTimeout(this.domWarnT); this.domWarnT = setTimeout(() => { el.style.opacity = '0'; }, 2400);
+  }
   updateNotice(dt) {
     const m = this.noticePanel?.mesh; if (!m) return;
     this.noticeT = Math.max(0, (this.noticeT || 0) - dt); m.visible = this.noticeT > 0;
@@ -940,7 +962,7 @@ export class Flow {
   // ================================================================ 03–04 ingredients
   canAdd(id) {
     const st = this.s.step;
-    if (!this.needed().includes(id)) { this.warn('맞지 않는 재료입니다.', `${ING[id].name}${josa(ING[id].name, '은', '는')} 이번 레시피에 들어가지 않아요`); return false; }
+    if (!this.needed().includes(id)) { this.warnWrong(id); return false; }
     if (this.s.done.has(id)) { this.toast(`${ING[id].name}${josa(ING[id].name, '은', '는')} 이미 넣었어요`); return false; }
     if (!ING[id].base && !BASE.every(b => this.s.done.has(b))) { this.toast('먼저 공통 베이스(요정설탕, 별가루)를 넣어주세요'); return false; }
     if (!['base', 'naturals'].includes(st)) return false;
@@ -1016,7 +1038,7 @@ export class Flow {
       const from = d.obj.position.clone(), to = d.open ? d.p0.clone().add(d.delta) : d.p0.clone();
       this.tween(0.4, k => d.obj.position.lerpVectors(from, to, ease.inOut(k)));
     }
-    if (d.open && !d.item && !this.s.done.has(d.id)) this.later(0.35, () => this.spawnDrawerItem(d));
+    if (d.open && !(d.item && d.item.parent)) this.later(0.35, () => this.spawnDrawerItem(d));   // free play: an empty drawer always has one more (also after the making steps)
   }
   spawnDrawerItem(d) {
     const id = d.id, it = this.make('ing_' + id, () => PH.stick(id));
@@ -1056,6 +1078,8 @@ export class Flow {
     const id = item.userData.ing, c = wp(this.board, V(0, 0.02, 0)); this.sfx('cut');
     this.fx.emit(c, { color: ING[id].color, count: 24, speed: 0.25, gravity: 0.8, life: 0.5 });
     this.ungrab(item); item.removeFromParent(); this.board.userData.item = null;
+    if (item === this.fruits[id]) this.later(1.2, () => this.spawnFruit(id));
+    const making = ['base', 'naturals'].includes(this.s.step);     // after the making steps cutting still works, the step hints stay put
     if (ING[id].action === 'cutSqueeze') {
       [-1, 1].forEach((sgn, i) => {
         const h = this.make('half_' + id, () => PH.fruitHalf(id));
@@ -1064,14 +1088,14 @@ export class Flow {
         this.grab(h, { modes: ['pinch', 'fist'], reach: 0.04 });
       });
       this.toast('반으로 잘렸어요! 반쪽을 들고 절구 위에서 즙을 짜주세요');
-      this.setHint('04 손질 · 즙 짜기', '자른 반쪽을 들고 절구 위에서 손을 꽉 쥐거나 놓아 즙을 짜주세요. (PC: 반쪽을 클릭한 채 절구 위로 끌어가 Space)');
+      if (making) this.setHint('04 손질 · 즙 짜기', '자른 반쪽을 들고 절구 위에서 손을 꽉 쥐거나 놓아 즙을 짜주세요. (PC: 반쪽을 클릭한 채 절구 위로 끌어가 Space)');
     } else {
       const s = this.make('pieces_' + id, () => PH.pieces(id));
       s.position.copy(this.group.worldToLocal(c.clone())); this.group.add(s);
       s.userData.ing = id; s.userData.squeeze = true;
       this.grab(s, { modes: ['pinch', 'fist'], reach: 0.05 });
       this.toast('썰었어요! 썬 진저를 절구에 넣어주세요');
-      this.setHint('04 손질 · 썰기 완료', '썰린 진저를 집어 절구에 넣어주세요.');
+      if (making) this.setHint('04 손질 · 썰기 완료', '썰린 진저를 집어 절구에 넣어주세요.');
     }
   }
 
@@ -1378,7 +1402,7 @@ export class Flow {
     // ingredients that go to the board first
     if ((ING[id]?.action === 'cutSqueeze' && (o === this.fruits[id])) || (id === 'ginger' && !o.userData.squeeze)) {
       if (this.over(o, this.zones.board)) {
-        if (!this.needed().includes(id)) { this.warn('맞지 않는 재료입니다.', `${ING[id].name}${josa(ING[id].name, '은', '는')} 이번 레시피에 들어가지 않아요`); return this.homeOrFloat(o); }
+        if (!this.needed().includes(id)) { this.warnWrong(id); return this.homeOrFloat(o); }
         if (this.board.userData.item && this.board.userData.item !== o) { this.toast('도마 위에 이미 재료가 있어요'); return this.homeOrFloat(o); }
         this.board.userData.item = o; o.userData.onBoard = true;
         this.tweenTo(o, wp(this.board, V(0, 0.016, 0)), new THREE.Quaternion(), 0.3);
@@ -1386,12 +1410,12 @@ export class Flow {
         this.setMarkers([this.knife]);
         return;
       }
-      if (this.over(o, this.zones.mortar)) this.toast('먼저 도마 위에서 칼로 손질해주세요');
+      if (this.over(o, this.zones.mortar)) { if (!this.needed().includes(id)) this.warnWrong(id); else this.toast('먼저 도마 위에서 칼로 손질해주세요'); }
       return this.homeOrFloat(o);
     }
     // things that go into the mortar
     if (o.userData.squeeze || (ING[id]?.action === 'pour') || o.userData.breakable) {
-      if (o.userData.breakable && !o.userData.broken) { if (this.over(o, this.zones.mortar)) this.toast(ING[id].action === 'tear' ? '양손으로 찢어서 넣어주세요 (PC: Space)' : '양손으로 부러뜨려서 넣어주세요 (PC: Space)'); return this.homeOrFloat(o); }
+      if (o.userData.breakable && !o.userData.broken) { if (this.over(o, this.zones.mortar) && !this.needed().includes(id)) { this.warnWrong(id); return this.homeOrFloat(o); } if (this.over(o, this.zones.mortar)) this.toast(ING[id].action === 'tear' ? '양손으로 찢어서 넣어주세요 (PC: Space)' : '양손으로 부러뜨려서 넣어주세요 (PC: Space)'); return this.homeOrFloat(o); }
       if (o.userData.squeeze && this.over(o, this.zones.mortar)) { if (this.addToMortar(o, id)) { this.cleanupPair(o); return; } }
       return this.homeOrFloat(o);
     }
@@ -1418,7 +1442,8 @@ export class Flow {
     const r = new THREE.Raycaster(p.clone().setY(Math.max(p.y, bb.max.y) + 0.25), V(0, -1, 0), 0, 4);
     const own = (x) => { for (let q = x; q; q = q.parent) if (q === this.group) return true; return false; };
     const hit = r.intersectObject(this.root, true).find(h => h.object.visible && !own(h.object) && h.face && h.face.normal.y > -0.2);
-    if (!hit || hit.point.y < 0.35) return false;             // floor or nothing: not a place to leave it
+    if (!hit) return false;
+    if (hit.point.y < 0.35 && Math.hypot(hit.point.x - L.stand.x, hit.point.z - L.stand.z) > 1.4) return false;   // far away on the floor: back to its place
     const yaw = new THREE.Euler().setFromQuaternion(o.getWorldQuaternion(new THREE.Quaternion()), 'YXZ').y;
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
     o.userData.restAt = hit.point.clone().add(V(0, bottom + 0.001, 0));
@@ -1479,6 +1504,13 @@ export class Flow {
       const o = this.mouseObj, ray = this.mouseRay();
       if (ray) {
         let p = ray.origin.clone().addScaledVector(ray.direction, this.mouseDepth);
+        // follow the surface under the cursor (desk, shelf, floor) so a release puts it right there; the fixed depth used
+        // to leave it hanging over the gap in front of the desk, and a drop there sent it back to where it came from
+        const h = this.cast?.(ray.origin, ray.direction, 2.2);
+        if (h && h.distance > 0.2) {
+          const n = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : V(0, 1, 0);
+          p = h.point.clone().addScaledVector(n, 0.03).add(V(0, 0.05, 0));
+        }
         for (const z of Object.values(this.zones)) if (z.obj?.visible !== false && this.over(o, z) && o !== z.obj) { p = this.zonePoint(z).add(V(0, z.hover || 0.12, 0)); break; }
         if (o === this.pestle && this.pestleDip) { this.pestleDip = Math.max(0, this.pestleDip - dt * 5); p.y -= Math.sin(this.pestleDip * Math.PI) * 0.08; }
         const cur = wp(o); cur.lerp(p, 1 - Math.exp(-dt * 14)); o.position.copy(this.group.worldToLocal(cur));
