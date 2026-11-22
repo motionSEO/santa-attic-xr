@@ -72,6 +72,12 @@ window.herbsReady = Promise.all([
       this.mouse = null;
       this.ray = new THREE.Raycaster();
       this.plants = [];
+      // modules from the space package (props.js, kitchen.js, drawers.js, snowglobe.js) join with garden.extras.push(obj),
+      // obj = { center, tryGrab(src), drop(src), update(dt) }: each one is bridged onto addGrabbable below
+      this.minY = -5;
+      this.extras = [];
+      const self = this;
+      this.extras.push = function (...xs) { for (const x of xs) self.bridgeExtra(x); return Array.prototype.push.apply(this, xs); };
       root.traverse(o => {
         const herb = o.isMesh && PLANT_OF(o.name);
         if (herb) { this.plants.push({ mesh: o, herb, wiggle: 0, base: o.scale.clone() }); o.userData.herb = herb; }
@@ -87,6 +93,31 @@ window.herbsReady = Promise.all([
 
     // ------------------------------------------------------------- registry
     addGrabbable(g) { this.grabbables.push(g); return g; }
+    // the space modules speak a smaller protocol (src.hold = hand position, src.hvel = hand speed): translate it
+    bridgeExtra(x) {
+      const obj = x.root || x.mesh || x.cab; if (!obj) return null;
+      const s = { id: 'hand', hold: new THREE.Vector3(), hvel: new THREE.Vector3(), pos: new THREE.Vector3() }, prev = new THREE.Vector3();
+      let anchor = null, mouse = false;
+      const dist = (p) => x.localBox && x.root ? x.localBox.distanceToPoint(x.root.worldToLocal(p.clone())) : Math.max(0, x.center.distanceTo(p) - 0.04);
+      const g = this.addGrabbable({
+        object: obj, modes: ['fist', 'pinch'], reach: 0.06, distance: dist, extra: x,
+        onGrab: (a) => {
+          s.id = 'hand'; a.getWorldPosition(_v);
+          s.hold.copy(dist(_v) < 0.06 ? _v : x.center); prev.copy(s.hold);   // pointed at from afar: it flies over (update lerps it to the hand)
+          anchor = x.tryGrab(s) ? a : null;
+        },
+        onRelease: () => { if (anchor) { anchor = null; x.drop(s); } },
+        onMouseDown: (hit) => { s.id = 'mouse'; s.hold.copy(hit.point); prev.copy(s.hold); mouse = !!x.tryGrab(s); },
+        onMouseUp: () => { if (mouse) { mouse = false; x.drop(s); } },
+        update: (dt) => {
+          if (anchor) anchor.getWorldPosition(s.hold);
+          else if (mouse && this.mouse) { this.ray.setFromCamera(this.mouse.ndc, this.camera); s.hold.copy(this.ray.ray.origin).addScaledVector(this.ray.ray.direction, this.mouse.depth); }
+          s.hvel.subVectors(s.hold, prev).divideScalar(Math.max(dt, 1e-3)); prev.copy(s.hold); s.pos.copy(s.hold);
+          x.update?.(dt);
+        }
+      });
+      return g;
+    }
     removeGrabbable(g) { this.grabbables = this.grabbables.filter(x => x !== g); }
     addPlant(mesh, herb) { mesh.userData.herb = herb; const p = { mesh, herb, wiggle: 0, base: mesh.scale.clone() }; this.plants.push(p); return p; }
 
@@ -380,6 +411,9 @@ window.herbsReady = Promise.all([
     return g;
   }
 
+  // what a dropped thing can land on: no plants, glass, cloth, garlands (same rule as the space package)
+  const SOFT = /glass|leaf|vine|fir|plant|curtain|garland|scarf|coat|ribbon|flame|snow|bulb|light|wire/i;
+  window.herbIsSolid = o => !o.isSkinnedMesh && o.isMesh && !SOFT.test(o.name) && ![].concat(o.material).some(m => m && (m.transparent || SOFT.test(m.name)));
   window.HerbGarden = HerbGarden;
   window.extractHerbModule = extractHerbModule;
   window.HERBS = HERBS;

@@ -1,7 +1,17 @@
 # Santa Attic · 1인칭
 
-크리스마스 산타 배쓰밤 XR 게임의 다락방 공간을 1인칭으로 걸어다닐 수 있게 만든 버전이에요.
-기존 프로토타입(`Dear-Stranger-from-Santa`)은 그대로 두고 따로 복제해서 작업해요.
+크리스마스 산타 배쓰밤 XR 게임의 다락방 체험이에요.
+`Dear-Stranger-from-Santa` 저장소를 복제한 뒤, 새로 전달받은 공간 패키지(Room_Module2 `web/`)의 방과 공간 에셋을 다시 적용한 버전이에요.
+기존 저장소와 그 GitHub Pages 링크는 그대로 남아 있어요.
+
+## 새 공간 패키지에서 바뀐 것
+- 방: 새 `room.glb`(문 추가 등)와, 실제로 불러오는 KTX2 압축본 `room.glb.js`. 책상 20cm 높임, 책장/서랍장/허브 트레이 배치 보정, 창밖 소나무(`trees.glb.js`), 통나무 벽, 조명 톤
+- 서랍장: 페인팅된 서랍장(`modules/drawers.js`)을 게임의 재료 서랍 6칸으로 사용. 이름표는 Rosewood, Cedarwood, Cinnamon, Vanilla, Eucalyptus, Ginger
+- 재료 병 5종, 레몬, 칼: `modules/kitchen.js`의 실제 모델로 교체(병은 책상 위 2단 선반). 쏟기, 자르기, 즙 짜기는 게임 방식 그대로. 베르가못은 아직 임시 그래픽
+- 추가: 턴테이블 + BGM 3곡(HUD `음악` 버튼), 벽난로 소리, 서랍 소리(3D 공간음), 천사(집어서 옮길 수 있음), 눈사람, 사슴, 협탁
+- 성능: 공간 패키지의 단일 프로필(그림자 끔, Lambert 재질, 퀘스트는 해상도 1배)을 따라요. `?quest`를 붙이면 PC에서도 퀘스트 설정으로 볼 수 있어요
+- 플레이어 위치: 높아진 책상 앞 (x 1.07, z 0). 게임 물건 배치는 `modules/flow.js`의 `L`, 병 위치는 `index.html`의 `SPACE_LAYOUT`
+- 공간 패키지 원래 설명서는 `SPACE.md`
 
 ## 체험 흐름 (원본 프로토타입과 같은 순서, 지금은 임시 그래픽)
 시작 → 벽난로에 불이 붙고 산타의 편지가 날아옴 → 01 레시피북에서 마음 고르기 → 02 레시피 확인 → 03 공통 베이스(선반의 병 쏟기) →
@@ -22,12 +32,16 @@
 
 ## 파일
 - `index.html` 메인 페이지 (three.js 0.169 + WebXR, 충돌은 three-mesh-bvh)
-- `room.glb` 다락방 모델 (Blender에서 내보낸 원본, 20MB)
+- `room.glb` 다락방 모델 (Blender에서 내보낸 원본, 수정하지 않는 소스), `room.glb.js` 실제로 불러오는 KTX2 압축본
+- `room.glb 변경후_실행.bat` + `_tools/` Blender에서 room.glb를 다시 내보낸 뒤 room.glb.js를 다시 만드는 도구 (node 필요, 처음 한 번 `_tools`에서 `npm i`)
+- `trees.glb.js` 창밖 소나무, `Sound/` BGM과 효과음 원본 (실제 재생은 `modules/audio.data.js`)
+- `modules/drawers.js`, `kitchen.js`, `props.js`, `turntable.js`, `nametag.js`, `audio3d.js`, `snowglobe.js` 공간 패키지 모듈 (`*.data.js`, `*.glb.js`는 base64로 넣은 에셋)
 - `modules/herbs.js` 허브 채취 + 손/컨트롤러/마우스 입력
 - `modules/mug.js` 코코아 머그 (김, 마시기, 다시 채우기)
 - `modules/flow.js` 체험 흐름 전체 (단계, 임시 오브젝트, 책/편지 UI, 에셋 교체)
 - `ASSETS.md`, `assets/*.example.json` 에셋 전달 형식과 교체 설정 예시
-- `herb-test.html`, `mug-test.html` 모듈 단독 테스트 페이지
+- `herb-test.html`, `mug-test.html`, `drawer-test.html`, `snowglobe-test.html` 모듈 단독 테스트 페이지
+- Blender 원본 `Room_Santa2_v2.blend`(108MB)는 GitHub 파일 크기 제한(100MB)을 넘어서 저장소에 넣지 않았어요. 전달 zip에 있어요
 - `lighting.json`, `area_lights.json` Blender 조명 값 (참고용), `run.bat` 윈도우 로컬 실행
 
 ## 실행

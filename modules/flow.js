@@ -63,27 +63,27 @@ const josa = (w, a, b) => { const c = w.charCodeAt(w.length - 1); return (c >= 0
 // ------------------------------------------------------------------ layout in the attic (world metres)
 // The player works standing at about (1.0, 0, 0) facing -x: the long desk is in front, the back
 // shelf (bottles, basket, herb tray) on the right, the bookcase drawers on the left, the fireplace behind-right.
-const DESK_Y = 0.702;
+const DESK_Y = 0.905;          // desk top in the new space (room setup lifts the desk 0.2 m)
 const L = {
-  // the player stands still at STAND (index.html uses the same spot) and everything is laid out within arm's reach:
-  // desk in front (-x), herb tray / basket on the right (-z), magic basin at the left hand, the bookcase drawers
-  // and the fireplace further away (reach them with a pointing pinch in VR, or a click on PC)
-  stand:   new THREE.Vector3(1.0, 0, -0.4),
-  book:    new THREE.Vector3(0.56, DESK_Y, 0.12),
-  mortar:  new THREE.Vector3(0.64, DESK_Y, -0.18),
-  pestle:  new THREE.Vector3(0.77, DESK_Y + 0.012, -0.12),
-  board:   new THREE.Vector3(0.63, DESK_Y, -0.46),
-  knife:   new THREE.Vector3(0.775, DESK_Y + 0.006, -0.44),
-  mold:    new THREE.Vector3(0.68, DESK_Y, 0.06),
-  basket:  new THREE.Vector3(0.78, DESK_Y, -0.96),
-  bottles: { fairySugar: [0.765, -0.62], starDust: [0.765, -0.70], benzoin: [0.765, -0.78], turmeric: [0.68, -0.66], coconutOil: [0.68, -0.75] },
-  firPot:  new THREE.Vector3(0.62, DESK_Y, -0.96),
+  // the player stands still at STAND (index.html uses the same spot: x 1.07, z 0, facing -x) and everything is laid out within
+  // arm's reach on the lifted desk (x 0.16..0.82, z -0.81..0.68, top y 0.905): left (+z) basket + fir, book, mold; centre mortar;
+  // right (-z) board, knife, mug and the 2-tier bottle shelf; herb tray on the side desk to the right; drawer cabinet behind-left
+  stand:   new THREE.Vector3(1.07, 0, 0),
+  book:    new THREE.Vector3(0.42, DESK_Y, 0.25),
+  mortar:  new THREE.Vector3(0.63, DESK_Y, 0.02),
+  pestle:  new THREE.Vector3(0.72, DESK_Y + 0.012, 0.13),
+  board:   new THREE.Vector3(0.55, DESK_Y, -0.20),
+  knife:   new THREE.Vector3(0.40, DESK_Y + 0.006, -0.16),
+  mold:    new THREE.Vector3(0.70, DESK_Y, 0.24),
+  basket:  new THREE.Vector3(0.64, DESK_Y, 0.52),
+  bottles: { fairySugar: [0.765, -0.62], starDust: [0.765, -0.70], benzoin: [0.765, -0.78], turmeric: [0.68, -0.66], coconutOil: [0.68, -0.75] },   // index.html puts them on the shelf
+  firPot:  new THREE.Vector3(0.40, DESK_Y, 0.53),
   drawers: ['rosewood', 'cedarwood', 'cinnamon', 'vanilla', 'eucalyptus', 'ginger'],
-  drawerOut: new THREE.Vector3(0.56, DESK_Y + 0.06, -0.32),   // drawer items fly over and land here, in front of the player
-  wrap:    new THREE.Vector3(0.64, DESK_Y, -0.22),
-  letter:  new THREE.Vector3(0.64, DESK_Y, -0.25),
-  basin:   new THREE.Vector3(1.1, 0, 0.22),
-  chimney: new THREE.Vector3(-0.42, 0.45, -1.45)
+  drawerOut: new THREE.Vector3(0.30, DESK_Y + 0.06, -0.02),   // drawer items fly over and land here, in front of the player
+  wrap:    new THREE.Vector3(0.62, DESK_Y, 0.02),
+  letter:  new THREE.Vector3(0.58, DESK_Y, 0.06),
+  basin:   new THREE.Vector3(1.38, 0, 0.30),
+  chimney: new THREE.Vector3(-0.42, 0.45, 0.50)              // index.html sets it from the fireplace logs
 };
 
 // ------------------------------------------------------------------ small helpers
@@ -365,6 +365,19 @@ const PH = {
   }
 };
 
+// real models from the space package (modules/kitchen.js): bottles, knife and lemon replace the placeholders,
+// everything the flow does with them (pour, cut, squeeze) stays the same. Bergamot has no model yet.
+function useSpaceModels(K) {
+  if (!K || PH.spaceModels) return; PH.spaceModels = true;
+  const KEY = { fairySugar: 'fairy', starDust: 'stardust', benzoin: 'benzoin', turmeric: 'turmeric', coconutOil: 'coconut' };
+  const bottle = PH.bottle, fruit = PH.fruit, half = PH.fruitHalf;
+  const onFloor = (o, y) => { o.position.y = y; const g = new THREE.Group(); g.add(o); return g; };   // flow models stand on y = 0
+  PH.bottle = (id) => KEY[id] ? (b => onFloor(b, b.userData.base))(K.makeBottle(KEY[id])) : bottle(id);
+  PH.knife = () => onFloor(K.makeKnife(), 0.002);
+  PH.fruit = (id) => id === 'lemon' ? onFloor(K.makeLemon(), K.LEMON_R()) : fruit(id);
+  PH.fruitHalf = (id) => id === 'lemon' ? onFloor(K.lemonHalf(1), K.LEMON_LEN / 2) : half(id);
+}
+
 // ================================================================== the flow
 export class Flow {
   constructor(ctx) {
@@ -381,6 +394,8 @@ export class Flow {
     this.assets = {};
     this.wrapTex = null;
     new THREE.TextureLoader().load('giftwrap.webp', t => { t.colorSpace = THREE.SRGBColorSpace; this.wrapTex = t; }, undefined, () => {});
+    useSpaceModels(window.Kitchen);
+    if (this.layout) for (const [k, v] of Object.entries(this.layout)) L[k] = v?.isVector3 ? v.clone() : v;   // index.html can move stations
     this.loadManifest();
     this.build();
     this.bindInput();
@@ -462,8 +477,8 @@ export class Flow {
     this.mold = null;   // made once the recipe is known
     // back shelf: bottles + fruit basket + fir pot
     this.bottles = {};
-    for (const [id, [x, z]] of Object.entries(L.bottles)) {
-      const b = this.make('bottle_' + id, () => PH.bottle(id)); b.position.set(x, DESK_Y, z); b.rotation.y = Math.PI / 2; G.add(b);
+    for (const [id, [x, z, y, rot]] of Object.entries(L.bottles)) {   // [x, z] on the desk, or [x, z, floorY, yaw] (shelf of the space package)
+      const b = this.make('bottle_' + id, () => PH.bottle(id)); b.position.set(x, y ?? DESK_Y, z); b.rotation.y = rot ?? Math.PI / 2; G.add(b);
       b.userData.ing = id; this.bottles[id] = b;
     }
     this.basket = this.make('basket', PH.basket); this.basket.position.copy(L.basket); G.add(this.basket);
@@ -476,16 +491,26 @@ export class Flow {
     const firPlant = fir.userData.placeholder.userData.plant; if (firPlant && this.garden) this.garden.addPlant(firPlant, 'fir');
     // drawers of the bookcase: each holds one ingredient
     this.drawers = [];
-    const dObjs = []; this.root.traverse(o => { if (/^Drawer00[2-7]$/.test(o.name)) dObjs.push(o); });
-    dObjs.sort((a, b) => a.name.localeCompare(b.name));
-    dObjs.forEach((d, i) => {
-      const id = L.drawers[i]; if (!id) return;
-      d.updateWorldMatrix(true, true);
-      const c = new THREE.Box3().setFromObject(d).getCenter(V());
-      const tag = labelPlane(ING[id].name, 0.07); tag.position.set(c.x, c.y + 0.0, 0.738); tag.rotation.y = Math.PI; G.add(tag);
-      const p0 = d.position.clone(), local = d.parent.worldToLocal(c.clone().add(V(0, 0, -0.11))).sub(d.parent.worldToLocal(c.clone()));
-      this.drawers.push({ obj: d, id, c, tag, p0, open: false, delta: local, item: null });
-    });
+    const ds = this.drawerSet;            // the painted cabinet of the space package (drawers.js) moves front + knob + name tag together
+    if (ds?.drawers?.length) {
+      ds.drawers.filter(x => /^Drawer00[2-7]$/.test(x.name)).sort((a, b) => a.name.localeCompare(b.name)).forEach((x, i) => {
+        const id = L.drawers[i]; if (!id) return;
+        const front = x.parts[0].o, plate = x.parts.find(p => /^NameTag/.test(p.o.name))?.o || front;
+        const c = new THREE.Box3().setFromObject(front).getCenter(V());
+        this.drawers.push({ obj: front, ds: x, id, c, tag: plate, open: false, item: null });
+      });
+    } else {
+      const dObjs = []; this.root.traverse(o => { if (/^Drawer00[2-7]$/.test(o.name)) dObjs.push(o); });
+      dObjs.sort((a, b) => a.name.localeCompare(b.name));
+      dObjs.forEach((d, i) => {
+        const id = L.drawers[i]; if (!id) return;
+        d.updateWorldMatrix(true, true);
+        const c = new THREE.Box3().setFromObject(d).getCenter(V());
+        const tag = labelPlane(ING[id].name, 0.07); tag.position.set(c.x, c.y + 0.0, 0.738); tag.rotation.y = Math.PI; G.add(tag);
+        const p0 = d.position.clone(), local = d.parent.worldToLocal(c.clone().add(V(0, 0, -0.11))).sub(d.parent.worldToLocal(c.clone()));
+        this.drawers.push({ obj: d, id, c, tag, p0, open: false, delta: local, item: null });
+      });
+    }
     // magic basin near the fireplace
     this.basin = this.make('basin', PH.basin); this.basin.position.copy(L.basin); G.add(this.basin);
     this.zones.basin = { obj: this.basin, off: V(0, 0.86, 0), r: 0.24, hover: 0.18 };
@@ -678,7 +703,7 @@ export class Flow {
       }
       // drawers: touch the front
       for (const d of this.drawers) {
-        const near = f.p.distanceTo(wp(d.obj)) < 0.09 && f.p.z < 0.8;
+        const near = f.p.distanceTo(wp(d.obj)) < 0.09 && f.p.z < d.c.z + 0.06;
         if (near && !st['d' + d.id]) { st['d' + d.id] = true; this.toggleDrawer(d); }
         else if (!near && f.p.distanceTo(wp(d.obj)) > 0.14) st['d' + d.id] = false;
       }
@@ -986,8 +1011,11 @@ export class Flow {
   toggleDrawer(d) {
     if (d.busy) return; d.busy = true; setTimeout(() => d.busy = false, 500);
     d.open = !d.open;
-    const from = d.obj.position.clone(), to = d.open ? d.p0.clone().add(d.delta) : d.p0.clone();
-    this.tween(0.4, k => d.obj.position.lerpVectors(from, to, ease.inOut(k)));
+    if (d.ds) { const from = d.ds.t, to = d.open ? 1 : 0; d.ds.shut = false; this.tween(0.4, k => { d.ds.t = from + (to - from) * ease.inOut(k); }); }
+    else {
+      const from = d.obj.position.clone(), to = d.open ? d.p0.clone().add(d.delta) : d.p0.clone();
+      this.tween(0.4, k => d.obj.position.lerpVectors(from, to, ease.inOut(k)));
+    }
     if (d.open && !d.item && !this.s.done.has(d.id)) this.later(0.35, () => this.spawnDrawerItem(d));
   }
   spawnDrawerItem(d) {

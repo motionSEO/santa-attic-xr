@@ -129,6 +129,18 @@ const lemonMap = lemonMesh.material.map; lemonMap.anisotropy = 1;
 const lemonMat = new THREE.MeshLambertMaterial({ map: lemonMap, side: THREE.DoubleSide, color: 0xffffff, emissive: 0x4a3f08 }), capMat = new THREE.MeshLambertMaterial({ map: capTexture(), side: THREE.DoubleSide, emissive: 0x2a2208 });
 const SC = LEMON_LEN / (lemonGeo.boundingBox.max.x - lemonGeo.boundingBox.min.x), RMAX = lemonGeo.boundingBox.max.y;
 
+function lemonHalf(side) {                                                 // one half: cut face up, rounded end down, origin on the cut
+  const grp = new THREE.Group(); const lm = new THREE.Mesh(clipX(lemonGeo, side), lemonMat); lm.scale.setScalar(SC); grp.add(lm);
+  const cg = new THREE.BufferGeometry(), pos = [0, 0, 0], nrm = [side, 0, 0], uv = [0.5, 0.5], idx = [], n = 40;
+  for (let i = 0; i <= n; i++) { const a = i / n * 6.2832; pos.push(0, Math.cos(a) * RMAX, Math.sin(a) * RMAX); nrm.push(side, 0, 0); uv.push(0.5 + Math.cos(a) * 0.5, 0.5 + Math.sin(a) * 0.5); if (i) idx.push(0, i, i + 1); }
+  cg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); cg.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3)); cg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); cg.setIndex(idx);
+  const cm = new THREE.Mesh(cg, capMat); cm.scale.setScalar(SC); grp.add(cm);
+  grp.rotation.z = -side * Math.PI / 2;                                     // cut face up, rounded end down
+  return grp;
+}
+function makeLemon() { const root = new THREE.Group(); root.name = 'Lemon'; const m = new THREE.Mesh(lemonGeo, lemonMat); m.scale.setScalar(SC); root.add(m); return root; }   // origin = centre
+const LEMON_R = () => RMAX * SC;
+
 class Lemon extends Grab {
   constructor(scene, garden, pos) {
     const root = new THREE.Group(); root.name = 'Lemon'; const m = new THREE.Mesh(lemonGeo, lemonMat); m.scale.setScalar(SC); root.add(m); root.position.copy(pos);
@@ -143,12 +155,7 @@ class Lemon extends Grab {
     this.cut = true; if (window.Audio3D) window.Audio3D.shot('cut', this.root.position, 1);
     const w = this.root.position.clone(), home = this.home.clone();
     [1, -1].forEach(side => {
-      const grp = new THREE.Group(); const lm = new THREE.Mesh(clipX(lemonGeo, side), lemonMat); lm.scale.setScalar(SC); grp.add(lm);
-      const cg = new THREE.BufferGeometry(), pos = [0, 0, 0], nrm = [side, 0, 0], uv = [0.5, 0.5], idx = [], n = 40;
-      for (let i = 0; i <= n; i++) { const a = i / n * 6.2832; pos.push(0, Math.cos(a) * RMAX, Math.sin(a) * RMAX); nrm.push(side, 0, 0); uv.push(0.5 + Math.cos(a) * 0.5, 0.5 + Math.sin(a) * 0.5); if (i) idx.push(0, i, i + 1); }
-      cg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); cg.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3)); cg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); cg.setIndex(idx);
-      const cm = new THREE.Mesh(cg, capMat); cm.scale.setScalar(SC); grp.add(cm);
-      grp.rotation.z = -side * Math.PI / 2;                                     // cut face up, rounded end down
+      const grp = lemonHalf(side);
       const root = new THREE.Group(); root.name = 'LemonHalf'; root.add(grp); root.position.copy(w); root.rotation.y = this.root.rotation.y; const th = this.root.rotation.y, ax = Math.cos(th), az = -Math.sin(th); root.position.x += ax * side * 0.02; root.position.z += az * side * 0.02;   // halves part along the lemon's long axis
       const h = new Grab(this.scene, this.garden, root, new THREE.Box3(new THREE.Vector3(-RMAX * SC, -LEMON_LEN / 2, -RMAX * SC), new THREE.Vector3(RMAX * SC, 0.006, RMAX * SC)), LEMON_LEN / 2, home); h.state = 'fall'; h.vel.set(ax * side * 0.15, 0.3, az * side * 0.15);
     });
@@ -157,6 +164,6 @@ class Lemon extends Grab {
   }
 }
 
-return { Grab, makeBottle, makeKnife, Lemon, BOTTLES };
+return { Grab, makeBottle, makeKnife, Lemon, BOTTLES, makeLemon, lemonHalf, LEMON_LEN, LEMON_R };
 })();
 window.Kitchen = null; window.kitchenReady.then(k => { window.Kitchen = k; });
