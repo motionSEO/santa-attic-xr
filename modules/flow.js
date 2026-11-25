@@ -2,7 +2,7 @@
 //
 // 인트로(벽난로에서 날아오는 편지) → 01 마음 고르기(레시피북) → 02 레시피 확인 → 03 공통 베이스 →
 // 03~04 자연재료 수집·손질 → 05 빻기 → 06 틀에 붓기·누르기·열기 → 07 장식 → 08 포장 →
-// 09 그림 편지 → 마법 수반 발송 → 다른 산타의 선물 받기
+// 09 손편지(modules/hand-letter.js) → 마법 수반 발송 → 다른 산타의 선물 받기
 //
 // Every object here is a temporary placeholder made from primitives. Each one is created through
 // make('<asset id>', builder) so a real model can replace it later from assets/manifest.json
@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { createHandLetter } from './hand-letter.js';
 
 // ------------------------------------------------------------------ data (from the original game)
 export const INTRO = {
@@ -328,19 +329,6 @@ const PH = {
     const seal = mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.003, 16), mat(0xb8322c)); seal.position.y = 0.0055; g.add(seal);
     return g;
   },
-  inkPot(color) {
-    const g = new THREE.Group();
-    const b = mesh(new THREE.CylinderGeometry(0.018, 0.02, 0.03, 16), mat(0x2b2b33, { transparent: true, opacity: 0.8, roughness: 0.15 })); b.position.y = 0.015; g.add(b);
-    const ink = mesh(new THREE.CircleGeometry(0.016, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, toneMapped: false })); ink.position.y = 0.031; g.add(ink);
-    return g;
-  },
-  pen() {
-    const g = new THREE.Group();
-    const b = mesh(new THREE.CylinderGeometry(0.004, 0.005, 0.13, 10), mat(0x2a2a2a)); b.position.y = 0.065; g.add(b);
-    const nib = mesh(new THREE.ConeGeometry(0.004, 0.012, 10).rotateX(Math.PI), mat(0xd4af37, { metalness: 0.8, roughness: 0.3 })); nib.position.y = -0.006; g.add(nib);
-    const feather = mesh(new THREE.CircleGeometry(0.025, 10), mat(0xf0e6d6, { side: THREE.DoubleSide })); feather.scale.set(0.35, 1.4, 1); feather.position.y = 0.12; g.add(feather);
-    return g;
-  },
   basin() {
     const g = new THREE.Group();
     const ped = mesh(new THREE.CylinderGeometry(0.07, 0.11, 0.72, 16), mat(0x7d7468, { roughness: 1 })); ped.position.y = 0.36; g.add(ped);
@@ -389,7 +377,7 @@ export class Flow {
     this.tweens = []; this.timers = []; this.follows = []; this.floaters = []; this.markers = [];
     this.panels = []; this.grabs = []; this.zones = {};
     this.mouseObj = null; this.mouseDepth = 0.42; this.tiltKey = false; this.tiltAmt = 0;
-    this.pressHold = null; this.drawing = false;
+    this.pressHold = null;
     this.s = { step: 'dark', emotion: null, recipe: null, recipeId: null, done: new Set(), pounds: 0, pourT: 0 };
     this.assets = {};
     this.wrapTex = null;
@@ -647,7 +635,7 @@ export class Flow {
       this.onClick(ray);
     });
     addEventListener('pointerup', (e) => {
-      if (e.button === 0) { this.pressHold = null; this.drawing = false; }
+      if (e.button === 0) this.pressHold = null;
     });
     c.addEventListener('wheel', (e) => { if (this.mouseObj) this.mouseDepth = THREE.MathUtils.clamp(this.mouseDepth - e.deltaY * 0.0006, 0.25, 1.0); }, { passive: true });
     this.renderer.xr.addEventListener('sessionstart', () => { if (this.s.step === 'dark') setTimeout(() => this.begin(), 600); });
@@ -659,7 +647,6 @@ export class Flow {
     if (this.lid && this.lid.visible) list.push(this.lid);
     if (this.wrapHandle && this.wrapHandle.visible) list.push(this.wrapHandle);
     if (this.recvBox && this.recvBox.visible) list.push(this.recvBox);
-    for (const p of this.inkPots || []) list.push(p);
     return list;
   }
   onClick(ray) {
@@ -670,20 +657,18 @@ export class Flow {
   clickHit(h, who = 'mouse') {
     const o = h.object;
     const owner = (x) => { for (let q = x; q; q = q.parent) { if (q.userData.panel) return { panel: q.userData.panel }; if (this.drawers.some(d => d.obj === q || d.tag === q)) return { drawer: this.drawers.find(d => d.obj === q || d.tag === q) };
-      if (q === this.lid) return { lid: true }; if (q === this.wrapHandle) return { wrap: true }; if (q === this.recvBox) return { recv: true }; if (this.inkPots?.includes(q)) return { ink: q }; } return {}; };
+      if (q === this.lid) return { lid: true }; if (q === this.wrapHandle) return { wrap: true }; if (q === this.recvBox) return { recv: true }; } return {}; };
     const w = owner(o);
     if (w.panel) {
-      if (w.panel === this.letterPaper) { if (who !== 'mouse') return false; this.drawing = true; this.drawAt(h.uv); return true; }
       const id = w.panel.hitUV(h.uv); if (id) this.press(w.panel, id); return !!id;
     } else if (w.drawer) this.toggleDrawer(w.drawer);
     else if (w.lid) this.lidClick();
     else if (w.wrap) this.coverWrap();
     else if (w.recv) this.openReceived();
-    else if (w.ink) this.pickInk(w.ink.userData.color);
     else return false;
     return true;
   }
-  // XR: fingertips press panel buttons, touch drawers/lid/handles, draw on the letter
+  // XR: fingertips press panel buttons, touch drawers/lid/handles (the hand letter reads the hands itself)
   fingertips() {
     const out = [];
     for (const s of this.garden?.hands || []) {
@@ -703,9 +688,8 @@ export class Flow {
         const key = pnl.mesh.uuid;
         if (inside && Math.abs(lp.z) < 0.014) {
           const uv = new THREE.Vector2(lp.x / pnl.w + 0.5, lp.y / pnl.h + 0.5);
-          if (pnl === this.letterPaper) { this.drawAt(uv, f.slot); continue; }
           if (!st[key]) { st[key] = true; const id = pnl.hitUV(uv); if (id) this.press(pnl, id); }
-        } else if (!inside || lp.z > 0.03 || lp.z < -0.03) { st[key] = false; if (pnl === this.letterPaper) this.strokeEnd(f.slot); }
+        } else if (!inside || lp.z > 0.03 || lp.z < -0.03) { st[key] = false; }
       }
       // drawers: touch the front
       for (const d of this.drawers) {
@@ -717,8 +701,6 @@ export class Flow {
       if (this.recvBox?.visible && this.s.step === 'receive' && f.p.distanceTo(wp(this.recvBox, V(0, 0.05, 0))) < 0.12) this.openReceived();
       // wrap handle: pinch it and lay it over the bath bomb (or just touch it)
       if (this.wrapHandle?.visible && this.s.step === 'wrapCover' && f.p.distanceTo(wp(this.wrapHandle)) < 0.05) this.coverWrap();
-      // ink pots
-      for (const p of this.inkPots || []) if (f.p.distanceTo(wp(p, V(0, 0.03, 0))) < 0.03) this.pickInk(p.userData.color);
     }
     // pressing the mold lid: a hand (palm) resting on it
     if (this.s.step === 'press' && this.lid) {
@@ -881,7 +863,6 @@ export class Flow {
       if (id === 'back' && this.s.step === 'recipe') { this.s.step = 'emotion'; this.pages.set({ view: 'choose', selected: null }); this.setHint('01 마음 고르기', '전하고 싶은 마음을 다시 골라주세요.'); }
     }
     if (panel === this.parchment && id === 'next') return this.closeParchment();
-    if (panel && panel === this.letterBtns) { if (id === 'clear') this.clearLetter(); if (id === 'done') this.finishLetter(); }
     if (panel && panel === this.endPanel && id === 'restart') location.reload();
   }
   chooseEmotion(id) {
@@ -1258,54 +1239,36 @@ export class Flow {
     this.later(1.6, () => this.toLetter());
   }
 
-  // ================================================================ 09 picture letter
+  // ================================================================ 09 hand letter (modules/hand-letter.js)
+  // A big letter paper stands in front of the player (on a thin stand down to the floor). Pick up the pencil next to it
+  // and write with the pencil tip (Quest hands: pinch / fist, controllers: trigger / grip, PC: hold the left button and drag).
+  // [지우기] 1 s / [보내기] 0.7 s held down. Sending folds the letter and it flies away, then it becomes the envelope.
   toLetter() {
     this.s.step = 'letter';
-    this.strokes = []; this.inkColor = '#c0392b';
     const gp = wp(this.gift).add(V(0.06, 0, 0.3)); this.tweenTo(this.gift, gp, null, 0.8, () => this.restBelow(this.gift));
-    this.letterPaper = new Panel({ w: 0.26, h: 0.19, px: 760, transparent: false, name: 'LetterPaper', draw: (g, P) => {
-      if (!P.bg) { g.fillStyle = '#fbf5e8'; g.fillRect(0, 0, P.W, P.H); }
-      g.strokeStyle = '#eadfc8'; g.lineWidth = 2; for (let y = 60; y < P.H; y += 50) { g.beginPath(); g.moveTo(30, y); g.lineTo(P.W - 30, y); g.stroke(); }
-      for (const s of this.strokes) { g.strokeStyle = s.color; g.lineWidth = 7; g.lineCap = g.lineJoin = 'round'; g.beginPath(); s.pts.forEach(([x, y], i) => i ? g.lineTo(x * P.W, y * P.H) : g.moveTo(x * P.W, y * P.H)); g.stroke(); }
-      if (!this.strokes.length) P.text('여기에 그림으로 마음을 그려주세요', P.W / 2, P.H / 2 - 18, { size: 30, color: '#b9aa9b', align: 'center' });
-    } });
-    const m = this.letterPaper.mesh; m.rotation.set(-Math.PI / 2, 0, Math.PI / 2); m.position.copy(L.letter).add(V(0, 0.002, 0)); this.group.add(m);
-    this.panels.push(this.letterPaper); this.garden?.blockers.push(m);
-    this.letterBtns = new Panel({ w: 0.26, h: 0.06, px: 780, name: 'LetterButtons', draw: (g, P) => {
-      P.button('clear', 10, 10, 360, P.H - 20, '다시 그리기', { color: '#8a6f5e', size: 40 });
-      P.button('done', P.W - 370, 10, 360, P.H - 20, '편지 완성', { color: INK.green, size: 40, disabled: !this.strokes.length });
-    } });
-    const b = this.letterBtns.mesh; b.position.copy(L.letter).add(V(0.15, 0.05, 0)); b.rotation.set(0, Math.PI / 2, 0); b.rotateX(-0.5); this.group.add(b);
-    this.panels.push(this.letterBtns); this.garden?.blockers.push(b);
-    this.inkPots = ['#c0392b', '#2e7d32', '#1565c0', '#f9a825', '#6a1b9a'].map((c, i) => {
-      const p = this.make('inkPot', () => PH.inkPot(c)); p.userData.color = c;
-      p.position.set(L.letter.x + 0.135, DESK_Y, L.letter.z + 0.17 + i * 0.05); this.group.add(p); return p;
-    });
-    this.pen = this.make('pen', PH.pen); this.pen.position.set(L.letter.x + 0.13, DESK_Y + 0.006, L.letter.z - 0.22); this.pen.rotation.z = Math.PI / 2; this.group.add(this.pen);
-    this.grab(this.pen, { modes: ['pinch', 'fist'], reach: 0.04, tip: V(0, -0.012, 0) });
-    this.setHint('09 그림 편지', '종이에 손가락(또는 펜)으로 그림을 그려 마음을 표현해보세요. 잉크병을 만지면 색이 바뀌어요. 다 그리면 \'편지 완성\'. (PC: 종이 위에서 왼쪽 버튼을 누른 채 마우스로 그리기)');
-    this.setMarkers([{ obj: m, off: V(0, 0, 0.06) }]);
+    if (!this.handLetter) {
+      const hl = this.handLetter = createHandLetter({
+        renderer: this.renderer, scene: this.scene, camera: this.camera, parent: this.rig || this.scene,
+        lang: 'ko', texts: { dear: '이름 모를 산타에게' }, storageKey: 'santa-attic-hand-letter-pose',
+        addLight: false,                                   // the attic has its own lights (a hemisphere light would light the whole room)
+        floorY: () => this.P?.feet?.y ?? 0,
+      });
+      // the room renders with AgX tone mapping: keep the paper, buttons and handles at the colours of the design
+      for (const o of [hl.letter.group, hl.letter.stand, hl.letter.shadow]) o.traverse((m) => { if (m.isMesh && m.material.isMeshBasicMaterial) m.material.toneMapped = false; });
+      hl.onBeforeSend = (png) => { this.letterImage = png; };
+      hl.onSend = () => this.sfx('letter');
+      hl.onDone = () => this.finishLetter();
+    }
+    this.letterImage = null;
+    this.handLetter.show();
+    this.setHint('09 손편지', '편지지 옆의 연필을 집어(꼬집거나 쥐어서) 이름 모를 산타에게 편지를 써보세요. 다 쓰면 [보내기]를 잠시 누르고 있어요. 오른쪽 [각도], 아래 [이동] 손잡이로 편지지를 맞출 수 있어요. (PC: 종이 위에서 왼쪽 버튼을 누른 채 끌어서 쓰기)');
+    this.setMarkers([]);
   }
-  pickInk(c) { if (this.inkColor !== c) { this.inkColor = c; this.toast('잉크 색이 바뀌었어요'); } }
-  drawAt(uv, who = 'mouse') {
-    if (this.s.step !== 'letter' || !uv) return;
-    const x = uv.x, y = 1 - uv.y;
-    let s = this.curStroke?.who === who ? this.curStroke : null;
-    if (!s) { s = this.curStroke = { who, color: this.inkColor, pts: [] }; this.strokes.push(s); }
-    const last = s.pts[s.pts.length - 1];
-    if (!last || Math.hypot(last[0] - x, last[1] - y) > 0.004) { s.pts.push([x, y]); this.letterPaper.redraw(); if (this.strokes.length === 1 && s.pts.length === 2) this.letterBtns.redraw(); }
-  }
-  strokeEnd(who) { if (this.curStroke?.who === who) this.curStroke = null; }
-  clearLetter() { this.strokes = []; this.curStroke = null; this.letterPaper.redraw(); this.letterBtns.redraw(); }
   finishLetter() {
-    if (this.s.step !== 'letter' || !this.strokes?.length) return;
+    if (this.s.step !== 'letter') return;
     this.s.step = 'sendPrep';
     this.toast('편지 완성');
-    const m = this.letterPaper.mesh;
-    this.panels = this.panels.filter(p => p !== this.letterPaper && p !== this.letterBtns);
-    const s0 = m.scale.clone(); this.tween(0.6, k => m.scale.set(s0.x, s0.y * Math.max(0.05, 1 - k), s0.z), () => m.removeFromParent());
-    this.letterBtns.mesh.removeFromParent();
-    for (const p of this.inkPots) p.visible = false; this.forceRelease(this.pen); this.ungrab(this.pen); this.pen.visible = false;
+    this.handLetter?.hide();
     this.env = this.make('envelope', PH.envelope); this.env.position.copy(this.group.worldToLocal(L.letter.clone().add(V(0, 0.01, 0)))); this.group.add(this.env);
     this.later(0.7, () => this.toSend());
   }
@@ -1518,18 +1481,11 @@ export class Flow {
         const camYaw = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ').y;
         const right = V(Math.cos(camYaw), 0, -Math.sin(camYaw));
         const q = new THREE.Quaternion().setFromAxisAngle(right, -this.tiltAmt * 2.0).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, camYaw, 0)));
-        if (o === this.knife || o === this.pen) q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 2, -0.4)));
+        if (o === this.knife) q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 2, -0.4)));
         if (o === this.pestle) q.identity();
         o.quaternion.slerp(q, 1 - Math.exp(-dt * 12));
       }
-      if (this.drawing && this.letterPaper) {     // PC drawing: keep tracing where the view points
-        const r = new THREE.Raycaster(); r.setFromCamera(this.garden.mouse.ndc, this.camera);
-        const h = r.intersectObject(this.letterPaper.mesh)[0]; if (h) this.drawAt(h.uv); else this.strokeEnd('mouse');
-      }
-    } else if (this.drawing && this.letterPaper && this.garden?.mouse) {
-      const r = new THREE.Raycaster(); r.setFromCamera(this.garden.mouse.ndc, this.camera);
-      const h = r.intersectObject(this.letterPaper.mesh)[0]; if (h) this.drawAt(h.uv); else this.strokeEnd('mouse');
-    } else if (!this.drawing) this.strokeEnd('mouse');
+    }
 
     // continuous checks: pouring, sprinkling, knife, pestle, two-hand break, mortar into mold
     this.continuous(dt);
@@ -1597,13 +1553,8 @@ export class Flow {
       for (const s of this.garden?.hands || []) if (s.connected && s.pinch && s.point.distanceTo(wp(this.wrapHandle)) < 0.06) { this.wrapGrab = s; }
       if (this.wrapGrab) { if (!this.wrapGrab.pinch) this.wrapGrab = null; else if (this.wrapGrab.point.distanceTo(wp(this.bomb)) < 0.1) this.coverWrap(); }
     }
-    // pen (XR): its tip draws on the letter
-    if (st === 'letter' && this.held(this.pen) && this.pen.userData.holder !== 'mouse') {
-      const tip = wp(this.pen, V(0, -0.012, 0)), lp = this.letterPaper.mesh.worldToLocal(tip.clone());
-      if (Math.abs(lp.z) < 0.012 && Math.abs(lp.x) < 0.13 && Math.abs(lp.y) < 0.095) this.drawAt(new THREE.Vector2(lp.x / 0.26 + 0.5, lp.y / 0.19 + 0.5), 'pen');
-      else this.strokeEnd('pen');
-      for (const p of this.inkPots) if (tip.distanceTo(wp(p, V(0, 0.03, 0))) < 0.03) this.pickInk(p.userData.color);
-    }
+    // hand letter (09): its own pencil, hands / controllers / mouse
+    this.handLetter?.update(dt);
   }
 }
 
