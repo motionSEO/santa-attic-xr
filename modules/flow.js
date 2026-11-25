@@ -477,7 +477,7 @@ export class Flow {
     this.book.scale.setScalar(0.75);
     G.add(this.book); this.bookHome = { pos: this.book.position.clone(), quat: this.book.quaternion.clone(), scale: this.book.scale.clone() };
     this.panels.push(this.pages);
-    for (const c of this.book.children) c.visible = false;                   // the placeholder only shows if the LUSH book fails to load
+    for (const c of this.book.children) c.visible = false;                   // the placeholder book is never shown (the LUSH book replaces it)
     this.loadRecipeBook();
 
     // work tools
@@ -1054,6 +1054,15 @@ export class Flow {
   // desk, rises in front of you when Nicolas is done and goes back to the desk when gathering starts, exactly as before.
   async loadRecipeBook() {
     try {
+      // The module reads its page images back from a canvas. When a host serves those files from another origin
+      // (raw.githack.com redirects big files to raw.githubusercontent.com) the canvas would be tainted and the book
+      // fails to build. So its images are requested with CORS (both hosts allow it); the module itself is untouched.
+      if (!HTMLImageElement.prototype.__rbCors) {
+        const d = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+        Object.defineProperty(HTMLImageElement.prototype, 'src', { configurable: true, get() { return d.get.call(this); },
+          set(v) { if (typeof v === 'string' && v.includes('recipe-book/assets/') && !this.crossOrigin) this.crossOrigin = 'anonymous'; d.set.call(this, v); } });
+        HTMLImageElement.prototype.__rbCors = true;
+      }
       const rb = await createRecipeBook({ renderer: this.renderer, assetsUrl: 'modules/recipe-book/assets/' });
       this.rb = rb;
       rb.object.scale.setScalar(RB_SCALE);
@@ -1063,9 +1072,11 @@ export class Flow {
       this.book.add(rb.object);
       rb.on('change', (st) => this.onBookChange(st));
       if (['emotion', 'recipe'].includes(this.s.step)) rb.openInstant();     // loaded late: catch up
-    } catch (e) {
-      console.warn('recipe book module:', e); this.rbFailed = true;
-      for (const c of this.book.children) c.visible = true;                  // fall back to the placeholder book
+    } catch (e) {                                                            // never the placeholder book: try again
+      console.warn('recipe book module:', e);
+      this.rbTries = (this.rbTries || 0) + 1;
+      if (this.rbTries < 5) setTimeout(() => this.loadRecipeBook(), 2000);
+      else this.setHint('레시피북을 불러오지 못했어요', '페이지를 새로고침해주세요.');
     }
   }
   bookNormal() { return V(0, 1, 0).applyQuaternion(this.book.getWorldQuaternion(new THREE.Quaternion())); }
@@ -1088,11 +1099,10 @@ export class Flow {
   }
   showEmotionBook() {
     // the LUSH book is ~14 MB: if it is still downloading, wait for it (up to 2 min) instead of showing the placeholder
-    if (!this.rb && !this.rbFailed && (this.rbWait = (this.rbWait || 0) + 1) < 240) {
-      if (this.rbWait === 1) this.setHint('레시피북을 펼치는 중…', '잠시만 기다려주세요.');
+    if (!this.rb) {                                                          // only ever the LUSH book: wait for it
+      if (!this.rbWait) { this.rbWait = true; this.setHint('레시피북을 펼치는 중…', '잠시만 기다려주세요.'); }
       this.later(0.5, () => this.showEmotionBook()); return;
     }
-    if (!this.rb) for (const c of this.book.children) c.visible = true;      // gave up waiting: placeholder book
     this.s.step = 'emotion';
     this.pages.set({ view: 'choose', selected: null });
     this.scene.attach(this.book);
