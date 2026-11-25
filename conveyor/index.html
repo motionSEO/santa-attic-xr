@@ -1,0 +1,1262 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Santa Attic</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:#0b0d12; overflow:hidden;
+    font:13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color:#e8e3da; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; }
+
+  #hud { position:fixed; left:16px; top:16px; z-index:16; display:flex; flex-direction:column; gap:8px;
+    max-width:min(280px, calc(100vw - 32px)); }
+  .panel { background:rgba(16,14,12,.72); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,220,180,.14); border-radius:10px; padding:10px 12px; }
+  .panel h1 { margin:0 0 8px; font-size:13px; font-weight:600; letter-spacing:.02em; color:#ffd9a8; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; }
+  button { font:inherit; color:#e8e3da; background:rgba(255,215,170,.10);
+    border:1px solid rgba(255,215,170,.22); border-radius:7px; padding:5px 9px; cursor:pointer; }
+  button:hover { background:rgba(255,215,170,.20); }
+  button[aria-pressed="true"] { background:#c2742f; border-color:#e0a05a; color:#1a1208; font-weight:600; }
+  label.slider { display:flex; align-items:center; gap:8px; margin-top:7px; font-size:12px; color:#c9c0b2; }
+  label.slider input { flex:1; accent-color:#d98c3a; }
+  label.slider b { min-width:34px; text-align:right; font-variant-numeric:tabular-nums; color:#e8e3da; font-weight:600; }
+
+  #loading { position:fixed; inset:0; z-index:20; display:grid; place-content:center; gap:14px;
+    background:#0b0d12; transition:opacity .5s ease; text-align:center; }
+  #loading.done { opacity:0; pointer-events:none; }
+  #bar { width:220px; height:3px; background:rgba(255,255,255,.12); border-radius:2px; overflow:hidden; }
+  #bar i { display:block; height:100%; width:0%; background:#d98c3a; transition:width .2s ease; }
+  #err { position:fixed; inset:auto 16px 16px; z-index:30; display:none; padding:12px 14px;
+    background:#3a1515; border:1px solid #7a3030; border-radius:10px; white-space:pre-wrap; font-size:12px; }
+
+  #toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); z-index:14; padding:7px 14px; border-radius:20px;
+    background:rgba(16,14,12,.75); color:#ffd9a8; font-size:13px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  #toast.on { opacity:1; }
+  #cross { position:fixed; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; z-index:9;
+    border-radius:50%; background:rgba(255,230,200,.85); box-shadow:0 0 0 1.5px rgba(0,0,0,.45); display:none; pointer-events:none; }
+  body.locked #cross { display:block; }
+  #start { position:fixed; inset:0; z-index:15; display:grid; place-content:center; text-align:center; gap:10px;
+    background:rgba(8,9,13,.55); cursor:pointer; }
+  #start b { font-size:17px; color:#ffd9a8; }
+  #start span { color:#c9c0b2; font-size:12px; }
+  body.locked #start, body.started #start, body.xr #start { display:none; }
+  body.locked #hud { opacity:.35; pointer-events:none; }
+  #cams, #mode, #pad { display:none !important; }
+  #pad { position:fixed; left:24px; bottom:24px; z-index:12; width:120px; height:120px; border-radius:50%;
+    border:1px solid rgba(255,215,170,.3); background:rgba(16,14,12,.35); display:none; touch-action:none; }
+  #pad i { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px; border-radius:50%;
+    background:rgba(255,215,170,.35); }
+  @media (pointer:coarse) { #pad { display:block; } #start { display:none; } }
+  @media (max-width: 640px) { #hud { left:10px; top:10px; } .panel { padding:8px 10px; } }
+#hint{position:fixed;top:14px;left:50%;transform:translateX(-50%);max-width:min(560px,90vw);padding:10px 16px;border-radius:12px;background:rgba(20,14,10,.78);color:#f3e6d3;font-size:14px;line-height:1.5;text-align:center;pointer-events:none;display:none;z-index:20}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="loading"><div style="color:#ffd9a8;font-size:14px">작업실 불러오는 중…</div><div id="bar"><i></i></div></div>
+
+<div id="hud">
+  <div class="panel">
+    <h1>Santa Attic · 1인칭</h1>
+    <div class="row" id="cams"></div>
+    <label class="slider">밝기 <input id="exp" type="range" min="0.2" max="3" step="0.05" value="1.23"><b id="expv">1.23</b></label>
+    <label class="slider">블룸 <input id="blm" type="range" min="0" max="0.8" step="0.02" value="0.16"><b id="blmv">0.16</b></label>
+    <label class="slider">조명 <input id="lit" type="range" min="0.2" max="3" step="0.05" value="1"><b id="litv">1.00</b></label>
+    <div class="row" style="margin-top:8px">
+      <button id="mode" aria-pressed="true">1인칭 걷기</button>
+      <button id="shadows" aria-pressed="false">그림자</button>
+      <button id="music" aria-pressed="true">음악</button>
+    </div>
+    <div style="margin-top:7px;font-size:11px;color:#9c9387"><b style="color:#ffd9a8">작업대 앞 제자리에서 체험해요. 시작하면 산타마을 촌장 니콜라스가 문을 열고 들어와 인사해요. 안내(화면 위)를 따라가요.</b>
+      <br>PC: 오른쪽 버튼 드래그 = 둘러보기 · 왼쪽 클릭(누른 채 끌기) = 집기/누르기 · Space = 손 동작 · R 누른 채 = 기울이기 · 휠 = 거리
+      <br>퀘스트3 손: 엄지+검지 집기 / 주먹 = 잡기 · 손가락 끝 = 책·버튼 누르기 · 멀리 있는 것은 손으로 가리키면 빛줄기가 닿고, 그때 집으면 손으로 날아오거나 서랍이 열려요
+      <br>퀘스트3 컨트롤러: 트리거 = 집기(멀리 가리키기 포함) · 그립 = 주먹 · 오른쪽 스틱 = 회전</div>
+  </div>
+</div>
+<div id="start"><b>클릭해서 시작하기</b><span>제자리에서 체험해요 · 오른쪽 버튼을 누른 채 끌면 둘러보고, 왼쪽 클릭으로 물건을 만져요</span></div>
+<div id="cross"></div>
+<div id="toast"></div>
+<div id="hint"></div>
+<div id="pad"><i></i></div>
+<pre id="err"></pre>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+  "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+  "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.8.3/build/index.module.js"
+} }
+</script>
+
+<script src="modules/audio.data.js"></script>
+<script src="modules/audio3d.js"></script>
+<script src="modules/herbs.js"></script>
+<!-- hand-painted mug (Substance Painter) from the space package: switched OFF there too. To use it, add <script src="modules/mug.painted.js"></script> before modules/mug.js -->
+<script src="modules/mug.js"></script>
+<script src="modules/drawers.painted.js"></script>
+<script src="modules/drawers.js"></script>
+<script src="modules/turntable.glb.js"></script>
+<script src="modules/turntable.js"></script>
+<script src="modules/props.data.js"></script>
+<script src="modules/props.js"></script>
+<script src="modules/nametag.data.js"></script>
+<script src="modules/nametag.js"></script>
+<script src="modules/kitchen.data.js"></script>
+<script src="modules/kitchen.js"></script>
+<script src="modules/santa.js"></script>
+<!-- room: room.glb.js = room.glb with KTX2 textures (rebuild with "room.glb 변경후_실행.bat"); room.glb is the Blender source -->
+<script src="../room.glb.js" onerror="this.remove()"></script>
+<script src="../trees.glb.js" onerror="this.remove()"></script>
+<script type="module">
+import * as THREE from 'three';
+await window.herbsReady; await window.mugReady; await window.drawersReady; await window.turntableReady; await window.propsReady; await window.kitchenReady;
+const { HerbGarden, MugModule, DrawerSet, Turntable, Jukebox, Prop } = window;
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { computeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+const showErr = (m) => { const e = document.getElementById('err'); e.style.display='block'; e.textContent += m + '\n'; };
+window.addEventListener('error', e => showErr('⚠ ' + e.message));
+let toastT = 0;
+const toast = (m) => { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1600); };
+
+// ---------------------------------------------------------------- renderer
+const app = document.getElementById('app');
+// ONE performance profile for every device (from the space package: PC shows what the headset gets): no shadows, few lights,
+// small textures, Lambert materials, instanced low-poly baubles. Only the render resolution differs. ?quest forces the Quest settings.
+const LITE = true;
+const QUEST = /OculusBrowser|Quest/i.test(navigator.userAgent) || /[?&]quest/.test(location.search);
+const renderer = new THREE.WebGLRenderer({ antialias: !QUEST, powerPreference:'high-performance' });
+renderer.setPixelRatio(QUEST ? 1 : Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.AgXToneMapping;      // matches Blender's AgX view transform
+renderer.toneMappingExposure = 1.23;              // Blender view exposure +0.3 stops = 2^0.3
+renderer.shadowMap.enabled = !LITE;
+renderer.localClippingEnabled = true;   // CONVEYOR: the tables are cut off where they pass through the walls
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.xr.enabled = true;
+app.appendChild(renderer.domElement);
+// Quest 3: ask for hand tracking (controllers keep working too)
+document.body.appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
+if (LITE) { renderer.xr.setFoveation(0.5); renderer.xr.setFramebufferScaleFactor(0.8); }   // foveation is then adapted live (see the loop)
+RectAreaLightUniformsLib.init();
+
+const scene = new THREE.Scene();
+
+// Blender world: colour (0.05, 0.07, 0.11) at strength 0.22
+const WORLD = new THREE.Color().setRGB(0.05, 0.07, 0.11, THREE.LinearSRGBColorSpace);
+scene.background = WORLD.clone().multiplyScalar(0.3);
+// cool from the snow outside, warm bounce off the timber floor - this is what makes it read cosy
+const hemi = new THREE.HemisphereLight(
+  new THREE.Color().setRGB(0.36, 0.34, 0.40, THREE.LinearSRGBColorSpace),
+  new THREE.Color().setRGB(0.62, 0.30, 0.09, THREE.LinearSRGBColorSpace), 0.7);
+scene.add(hemi);
+
+// ---------------------------------------------------------------- player (first person)
+// Desktop: the camera sits at player.feet + eye height, yaw/pitch from a right-button drag (the cursor stays free for clicking).
+// VR: the camera lives in the rig; the rig stands on player.feet and the headset pose is added on top.
+const camera = new THREE.PerspectiveCamera(68, innerWidth/innerHeight, 0.02, 120);
+scene.add(camera);
+const rig = new THREE.Group();
+scene.add(rig);
+const controls = null;            // OrbitControls retired: this build is first-person only
+let currentView = null;
+
+// Blender is Z-up, glTF is Y-up:  three = (bx, bz, -by)
+const B2T = (p) => new THREE.Vector3(p[0], p[2], -p[1]);
+
+// spawn points (eye position + look target, from the Blender cameras)
+const VIEWS = {
+  '시작 위치': { pos:[1.07, 0.0, 1.60], target:[-0.5, 0.08, 1.05] },
+  '창문':     { pos:[0.45, 0.05, 1.50], target:[-1.05, 0.03, 1.55] },
+  '벽난로':   { pos:[0.15, 0.42, 1.55], target:[-0.52, 1.45, 0.72] },
+  '옷걸이':   { pos:[1.55, 0.70, 1.45], target:[1.92, 1.98, 1.10] }
+};
+
+const P = {
+  feet: new THREE.Vector3(),       // where the player stands (desktop and VR)
+  vy: 0,                           // vertical speed (falling)
+  eye: 1.55, eyeStand: 1.55, eyeCrouch: 0.95,
+  radius: 0.2, step: 0.32, minHead: 1.05, ceil: 9, walk: 1.25, run: 2.6, gravity: 9.8
+};
+// The player stays in one spot at the work desk (no walking, no teleport): only the view turns.
+const STAND = { feet: new THREE.Vector3(1.07, 0, 0), yaw: Math.PI / 2, pitch: -0.95 };   // in front of the lifted desk (same spot as the space package's player)
+let walkMode = true;               // false = free-fly (no collision), for inspecting the scene
+let yaw = 0, pitch = 0;
+const keys = new Set();
+
+function applyLook() {
+  camera.rotation.order = 'YXZ';
+  camera.rotation.set(pitch, yaw, 0);
+}
+function placeCamera() {
+  if (renderer.xr.isPresenting) return;
+  if (walkMode) camera.position.set(P.feet.x, P.feet.y + P.eye, P.feet.z);
+  applyLook();
+}
+
+// ---- collision world: static meshes of the room, BVH-accelerated
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
+const colliders = [];
+const ray = new THREE.Raycaster();
+ray.firstHitOnly = true;
+function buildColliders(root) {
+  root.updateMatrixWorld(true);
+  const bb = new THREE.Box3(), sz = new THREE.Vector3();
+  root.traverse(o => {
+    if (!o.isMesh || !o.visible) return;
+    const mn = (Array.isArray(o.material) ? o.material[0] : o.material)?.name || '';
+    if (/^Out/.test(o.name) || /^Out/.test(mn)) return;                 // the night outside the window
+    if (/^(DecoVine_|Mistletoe_|GLBWIN_)/.test(o.name)) return;          // hanging deco / garland
+    if (/flame|bulb|glow|led|flake/i.test(mn)) return;
+    bb.setFromObject(o).getSize(sz);
+    if (Math.max(sz.x, sz.y, sz.z) < 0.25) return;                       // small props (mug, herbs, clutter) never block
+    try { if (!o.geometry.boundsTree) o.geometry.computeBoundsTree(); } catch (e) { /* plain raycast fallback */ }
+    colliders.push(o);
+  });
+  console.log('colliders:', colliders.length);
+}
+const heldByPlayer = (o) => { for (let p = o; p; p = p.parent) if (p === camera || p === rig) return true; return false; };
+function cast(origin, dir, far) {
+  ray.set(origin, dir); ray.near = 0; ray.far = far;
+  const hits = ray.intersectObjects(colliders, false);
+  for (const h of hits) if (!heldByPlayer(h.object)) return h;
+  return null;
+}
+const _n = new THREE.Vector3(), _o = new THREE.Vector3(), _d = new THREE.Vector3(), DOWN = new THREE.Vector3(0, -1, 0), UP = new THREE.Vector3(0, 1, 0);
+function hitNormal(h) {
+  if (!h.face) return _n.copy(_d).negate();
+  return _n.copy(h.face.normal).transformDirection(h.object.matrixWorld);
+}
+function floorAt(x, y, z) {          // highest walkable surface under (x, y + step, z)
+  _o.set(x, y + P.step + 0.05, z);
+  const h = cast(_o, DOWN, P.step + 4);
+  return h ? h.point.y : null;
+}
+
+// move the feet by `move` (xz), sliding along walls; returns the new feet position
+const _m = new THREE.Vector3(), _best = new THREE.Vector3();
+function walkMove(feet, move, dt) {
+  const start = feet.clone();
+  _m.copy(move); _m.y = 0;
+  const heights = [0.18 + P.step, 0.62, 0.95];          // walls/furniture; the sloped roof is handled by head room below
+  for (let it = 0; it < 3; it++) {
+    const len = _m.length(); if (len < 1e-6) break;
+    _d.copy(_m).divideScalar(len);
+    let best = null;
+    for (const hgt of heights) {
+      _o.set(feet.x, feet.y + hgt, feet.z);
+      const h = cast(_o, _d, len + P.radius);
+      if (h && (!best || h.distance < best.distance)) best = h;
+    }
+    if (!best) { feet.add(_m); break; }
+    const go = Math.max(0, best.distance - P.radius);
+    feet.addScaledVector(_d, go);
+    _best.copy(hitNormal(best)); _best.y = 0;
+    if (_best.lengthSq() < 1e-6) break;
+    _best.normalize(); if (_best.dot(_d) > 0) _best.negate();
+    _m.addScaledVector(_d, -go);                    // what is left of the move...
+    _m.addScaledVector(_best, -_m.dot(_best));      // ...slides along the wall
+  }
+  // push out of anything we ended up too close to (corners, thin posts)
+  for (const hgt of [0.45, 0.9, P.eye - 0.08]) for (let k = 0; k < 8; k++) {
+    const a = k / 8 * Math.PI * 2; _d.set(Math.cos(a), 0, Math.sin(a));
+    _o.set(feet.x, feet.y + hgt, feet.z);
+    const h = cast(_o, _d, P.radius);
+    if (h) feet.addScaledVector(_d, -(P.radius - h.distance));
+  }
+  // ground: step up small ledges, fall down otherwise; never walk off into the void
+  const fy = floorAt(feet.x, feet.y, feet.z);
+  if (fy === null) { feet.copy(start); return feet; }
+  if (fy >= feet.y - 0.01) { feet.y = fy; P.vy = 0; }
+  else { P.vy -= P.gravity * dt; feet.y = Math.max(fy, feet.y + P.vy * dt); if (feet.y === fy) P.vy = 0; }
+  // head room: the attic roof slopes down to the floor; don't walk under it
+  _o.set(feet.x, feet.y + 0.3, feet.z);
+  const up = cast(_o, UP, 2.5);
+  const clear = up ? up.distance + 0.3 : 9;
+  if (clear < P.minHead) { feet.copy(start); }         // too low even ducking: the eaves stop you
+  else P.ceil = clear;                                  // otherwise the eye ducks under it (moveStep)
+  return feet;
+}
+
+// ---- input
+const el = renderer.domElement;
+el.addEventListener('contextmenu', e => e.preventDefault());
+const startEl = document.getElementById('start');
+const locked = () => document.pointerLockElement === el;
+// PC: no pointer lock. The cursor stays free: right-drag looks around, left click interacts where the cursor is.
+startEl.addEventListener('click', () => { document.body.classList.add('started'); window.__flow?.begin(); });
+document.addEventListener('pointerlockchange', () => document.body.classList.toggle('locked', locked()));
+document.addEventListener('mousemove', e => {
+  if (!locked()) return;
+  yaw   -= e.movementX * 0.0022;
+  pitch -= e.movementY * 0.0022;
+  pitch = THREE.MathUtils.clamp(pitch, -1.5, 1.5);
+});
+// while the pointer is locked, clicks aim at the crosshair: re-send them from the screen centre
+// so herbs.js / mug.js (which pick with clientX/Y) hit what the player is looking at
+for (const type of ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'click']) {
+  window.addEventListener(type, e => {
+    if (!e.isTrusted || !locked() || e.target !== el) return;
+    e.stopImmediatePropagation();
+    const r = el.getBoundingClientRect();
+    const init = { bubbles: true, cancelable: true, composed: true, button: e.button, buttons: e.buttons,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, movementX: e.movementX, movementY: e.movementY,
+      shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, altKey: e.altKey, metaKey: e.metaKey };
+    const Ctor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+    if (Ctor === PointerEvent) Object.assign(init, { pointerId: e.pointerId, pointerType: e.pointerType, isPrimary: e.isPrimary });
+    el.dispatchEvent(new Ctor(type, init));
+  }, true);
+}
+// unlocked fallback: right-drag to look (left button stays free for plants / mug)
+let dragging = false, lastX = 0, lastY = 0, dragId = null;
+el.addEventListener('pointerdown', e => {
+  if (locked()) return;
+  if (e.pointerType === 'mouse' && e.button !== 2) return;
+  if (e.pointerType !== 'mouse' && padId !== null && e.pointerId === padId) return;
+  dragging = true; dragId = e.pointerId; lastX = e.clientX; lastY = e.clientY;
+});
+addEventListener('pointerup', e => { if (e.pointerId === dragId) { dragging = false; dragId = null; } });
+addEventListener('pointermove', e => {
+  if (!dragging || e.pointerId !== dragId || locked()) return;
+  yaw   -= (e.clientX - lastX) * 0.004;
+  pitch -= (e.clientY - lastY) * 0.004;
+  pitch = THREE.MathUtils.clamp(pitch, -1.5, 1.5);
+  lastX = e.clientX; lastY = e.clientY;
+});
+addEventListener('keydown', e => { if (e.target.tagName !== 'INPUT') keys.add(e.code); });
+addEventListener('keyup',   e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+// touch: on-screen stick (bottom left), drag anywhere else to look
+const pad = document.getElementById('pad'), knob = pad.querySelector('i');
+let padId = null; const padV = new THREE.Vector2();
+pad.addEventListener('pointerdown', e => { padId = e.pointerId; pad.setPointerCapture(e.pointerId); padMove(e); });
+pad.addEventListener('pointermove', e => { if (e.pointerId === padId) padMove(e); });
+const padEnd = e => { if (e.pointerId !== padId) return; padId = null; padV.set(0, 0); knob.style.transform = ''; };
+pad.addEventListener('pointerup', padEnd); pad.addEventListener('pointercancel', padEnd);
+function padMove(e) {
+  const r = pad.getBoundingClientRect(), R = r.width / 2;
+  padV.set((e.clientX - r.left - R) / R, (e.clientY - r.top - R) / R);
+  if (padV.length() > 1) padV.normalize();
+  knob.style.transform = `translate(${padV.x * R * 0.6}px, ${padV.y * R * 0.6}px)`;
+}
+
+const _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _mv = new THREE.Vector3();
+function inputVector() {             // x = strafe, y = forward, from keys or the touch stick
+  let x = 0, y = 0;
+  if (keys.has('KeyW') || keys.has('ArrowUp'))    y += 1;
+  if (keys.has('KeyS') || keys.has('ArrowDown'))  y -= 1;
+  if (keys.has('KeyD') || keys.has('ArrowRight')) x += 1;
+  if (keys.has('KeyA') || keys.has('ArrowLeft'))  x -= 1;
+  x += padV.x; y -= padV.y;
+  const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; }
+  return { x, y };
+}
+function moveStep(dt) {
+  if (renderer.xr.isPresenting) return;
+  if (STAND) { P.eye = P.eyeStand; placeCamera(); return; }   // fixed spot: mouse look only
+  const crouch = keys.has('KeyC') || keys.has('ControlLeft');
+  // duck automatically under rafters and the sloping roof (attic!), C = crouch on purpose
+  const target = Math.min(crouch ? P.eyeCrouch : P.eyeStand, P.ceil - 0.14);
+  P.eye = target > P.eye ? Math.min(target, P.eye + dt * 2.0) : Math.max(target, P.eye - dt * 4.0);
+  const run = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  const speed = (crouch ? 0.6 : run ? P.run : P.walk) * dt;
+  const { x, y } = inputVector();
+  if (walkMode) {
+    _fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    _right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    _mv.set(0, 0, 0).addScaledVector(_fwd, y * speed).addScaledVector(_right, x * speed);
+    if (colliders.length) walkMove(P.feet, _mv, dt); else P.feet.add(_mv);
+  } else {                                              // free fly: no collision, Q/E up/down
+    camera.getWorldDirection(_fwd); _right.crossVectors(_fwd, UP).normalize();
+    camera.position.addScaledVector(_fwd, y * speed * 1.5).addScaledVector(_right, x * speed * 1.5);
+    if (keys.has('KeyE')) camera.position.y += speed;
+    if (keys.has('KeyQ')) camera.position.y -= speed;
+  }
+  placeCamera();
+}
+
+// ---- VR: left stick walks (with the same collisions), right stick snap-turns
+let snapReady = true;
+const _head = new THREE.Vector3(), _body = new THREE.Vector3();
+function vrStep(dt) {
+  const session = renderer.xr.getSession(); if (!session) return;
+  let mx = 0, my = 0, turn = 0;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad; if (!gp || gp.axes.length < 2) continue;
+    const ax = gp.axes.length >= 4 ? gp.axes[2] : gp.axes[0], ay = gp.axes.length >= 4 ? gp.axes[3] : gp.axes[1];
+    if (src.handedness === 'left')  { mx = ax; my = ay; }
+    if (src.handedness === 'right') turn = ax;
+  }
+  const xrCam = camera;   // the user camera (child of the rig) carries the headset pose in world space
+  xrCam.getWorldPosition(_head);
+  if (Math.abs(turn) > 0.7 && snapReady) {                // rotate the rig around the head
+    const a = -Math.sign(turn) * Math.PI / 6;
+    rig.position.sub(_head).applyAxisAngle(UP, a).add(_head);
+    rig.rotation.y += a; snapReady = false;
+  } else if (Math.abs(turn) < 0.3) snapReady = true;
+  if (STAND) return;                                       // fixed spot: snap turn only, no stick walking / teleport
+  const dead = 0.15;
+  if (Math.hypot(mx, my) < dead) { mx = 0; my = 0; }
+  xrCam.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+  _right.crossVectors(_fwd, UP).normalize();
+  _mv.set(0, 0, 0).addScaledVector(_fwd, -my * P.walk * dt).addScaledVector(_right, mx * P.walk * dt);
+  // the body is under the head, wherever the player physically stands in the play space
+  _body.set(_head.x, rig.position.y, _head.z);
+  const before = _body.clone();
+  if (colliders.length) { P.eye = P.eyeStand; walkMove(_body, _mv, dt); } else _body.add(_mv);
+  rig.position.x += _body.x - before.x; rig.position.z += _body.z - before.z; rig.position.y = _body.y;
+  P.feet.copy(_body);
+  teleportStep();
+}
+
+function applyStand() {
+  const fy = colliders.length ? floorAt(STAND.feet.x, 0.3, STAND.feet.z) : null;
+  P.feet.set(STAND.feet.x, fy ?? 0, STAND.feet.z); yaw = STAND.yaw; pitch = STAND.pitch;
+  rig.position.copy(P.feet); rig.rotation.set(0, yaw, 0);
+  placeCamera();
+}
+function applyView(v) {
+  const p = B2T(v.pos), t = B2T(v.target);
+  const dir = t.clone().sub(p).normalize();
+  yaw = Math.atan2(-dir.x, -dir.z);
+  pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+  currentView = v;
+  if (walkMode) {
+    const fy = colliders.length ? floorAt(p.x, p.y - 0.4, p.z) : null;
+    P.feet.set(p.x, fy ?? Math.max(0, p.y - P.eyeStand), p.z);
+  } else camera.position.copy(p);
+  rig.position.copy(P.feet); rig.rotation.set(0, yaw, 0);
+  placeCamera();
+}
+
+// ---- hands (and triggers): pinch at nothing = aim at the floor, let go = go there
+const tpLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]),
+  new THREE.LineBasicMaterial({ color: 0xffd9a8, transparent: true, opacity: 0.8 }));
+const tpRing = new THREE.Mesh(new THREE.RingGeometry(0.13, 0.17, 32).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0xffd9a8, transparent: true, opacity: 0.85, depthWrite: false }));
+tpLine.visible = tpRing.visible = false; tpLine.frustumCulled = false; scene.add(tpLine, tpRing);
+let tpSlot = null, tpTarget = null;
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _dir = new THREE.Vector3();
+function aimRay(slot, origin, dir) {
+  const J = slot.hand.joints;
+  if (slot.isHand && J && J['wrist'] && J['index-finger-phalanx-proximal']) {
+    J['wrist'].getWorldPosition(_a); J['index-finger-phalanx-proximal'].getWorldPosition(origin);
+    dir.subVectors(origin, _a).normalize();
+    dir.y -= 0.35; dir.normalize();                         // a relaxed hand points a bit high: aim lower
+  } else {
+    slot.ctrl.getWorldPosition(origin);
+    dir.set(0, 0, -1).applyQuaternion(slot.ctrl.getWorldQuaternion(new THREE.Quaternion()));
+  }
+}
+function validFloor(p) {
+  const fy = floorAt(p.x, p.y + 0.05, p.z); if (fy === null || Math.abs(fy - p.y) > 0.06) return false;
+  if (Math.abs(fy - P.feet.y) > 0.4) return false;
+  _o.set(p.x, fy + 0.3, p.z); const up = cast(_o, UP, 2.5); if (up && up.distance + 0.3 < P.minHead) return false;
+  for (let k = 0; k < 8; k++) {                            // not inside furniture
+    const a = k / 8 * Math.PI * 2; _d.set(Math.cos(a), 0, Math.sin(a)); _o.set(p.x, fy + 0.62, p.z);
+    const h = cast(_o, _d, P.radius * 0.9); if (h) return false;
+  }
+  return true;
+}
+function teleportStep() {
+  const aims = garden ? garden.aimingHands() : [];
+  if (tpSlot && !aims.includes(tpSlot)) {                 // released: jump
+    if (tpTarget) {
+      camera.getWorldPosition(_head);
+      rig.position.x += tpTarget.x - _head.x; rig.position.z += tpTarget.z - _head.z; rig.position.y = tpTarget.y;
+      P.feet.set(tpTarget.x, tpTarget.y, tpTarget.z);
+    }
+    tpSlot = null; tpTarget = null;
+  }
+  if (!tpSlot && aims.length) tpSlot = aims[0];
+  tpLine.visible = tpRing.visible = !!tpSlot;
+  if (!tpSlot) return;
+  aimRay(tpSlot, _b, _dir);
+  const h = cast(_b, _dir, 6);
+  tpTarget = null;
+  let end = _b.clone().addScaledVector(_dir, h ? h.distance : 3);
+  if (h && hitNormal(h).y > 0.7 && validFloor(h.point)) tpTarget = h.point.clone();
+  tpLine.geometry.setFromPoints([_b.clone(), end]);
+  tpRing.position.copy(end).y += 0.01;
+  tpRing.material.color.set(tpTarget ? 0xffd9a8 : 0xd05a4a);
+  tpLine.material.color.set(tpTarget ? 0xffd9a8 : 0xd05a4a);
+}
+
+// ---- VR is a phone-class GPU: fewer lights and no shadows while in the headset
+let xrSaved = null;
+function xrQuality(on) {
+  if (on) {
+    xrSaved = { shadows: renderer.shadowMap.enabled, lights: [] };
+    renderer.shadowMap.enabled = false;
+    keptLights.forEach((l, i) => { if (i >= 8 && l.visible) { l.visible = false; xrSaved.lights.push(l); } });
+    bloom.enabled = false;
+  } else if (xrSaved) {
+    renderer.shadowMap.enabled = xrSaved.shadows; xrSaved.lights.forEach(l => l.visible = true); bloom.enabled = true; xrSaved = null;
+  }
+  scene.traverse(o => { if (o.isMesh) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m && (m.needsUpdate = true)); });
+}
+
+// hand the camera over to the rig for VR, and take it back afterwards
+renderer.xr.addEventListener('sessionstart', () => {
+  xrQuality(true);
+  document.body.classList.add('xr');
+  if (document.pointerLockElement) document.exitPointerLock();
+  rig.position.copy(P.feet); rig.rotation.set(0, yaw, 0);
+  rig.add(camera);
+  camera.position.set(0, 0, 0);
+  camera.rotation.set(0, 0, 0);
+});
+renderer.xr.addEventListener('sessionend', () => {
+  xrQuality(false); tpSlot = null; tpLine.visible = tpRing.visible = false;
+  document.body.classList.remove('xr');
+  scene.add(camera);
+  yaw = rig.rotation.y; pitch = 0;
+  placeCamera();
+});
+const camRow = document.getElementById('cams');
+if (!STAND) Object.keys(VIEWS).forEach((name, i) => {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.setAttribute('aria-pressed', i === 0 ? 'true' : 'false');
+  b.onclick = () => {
+    [...camRow.children].forEach(c => c.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    applyView(VIEWS[name]);
+  };
+  camRow.appendChild(b);
+});
+applyStand();
+
+// ---------------------------------------------------------------- post
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new ShaderPass({   // NaN / Inf guard: replaces bad pixels (zero-length normals etc.) and caps HDR values before the bloom blur spreads them
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: 'varying vec2 vUv; uniform sampler2D tDiffuse; void main() { vec4 c = texture2D(tDiffuse, vUv); if (any(isnan(c)) || any(isinf(c))) c = vec4(0.0); c.rgb = min(c.rgb, vec3(32.0)); gl_FragColor = c; }'
+}));
+// keep bloom to the actual bulbs/fire - a low threshold veils the whole room in white
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.16, 0.5, 1.15);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// ---------------------------------------------------------------- scene load
+const draco = new DRACOLoader().setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/libs/draco/');
+const loader = new GLTFLoader().setDRACOLoader(draco);
+// room.glb.js textures are KTX2 (Basis): they stay compressed on the GPU, sized per object by _tools/ktx2room.mjs
+const ktx2 = new KTX2Loader().setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/libs/basis/').detectSupport(renderer);
+loader.setKTX2Loader(ktx2);
+
+const bar = document.querySelector('#bar i');
+// glTF hands Blender's watts over as candela, which is orders of magnitude too hot for
+// three's physical lights. This factor was measured against the Blender renders.
+const BASE_LIGHT_SCALE = 0.00002;
+let LIGHT_SCALE = BASE_LIGHT_SCALE;
+let shadowCasters = [], keptLights = [], rectLights = [];
+const WARM_TINT = new THREE.Color().setRGB(1.0, 0.80, 0.58, THREE.LinearSRGBColorSpace);   // raise the blue/green values to make it less warm
+const fireFx = { light: null, tick: null, snow: null, halos: [] };
+const pineLights = [];
+const swayT = { value: 0 };
+let garden = null, flow = null, turntable = null, jukebox = null, drawerSet = null;
+// where the flow's stations go in the new space (world metres). The desk top is now y 0.905 (LIFT 0.2 in the room setup).
+// Bottles stand on the small 2-tier shelf on the desk (node HerbTray002, turned 63.4 deg): [x, z, floorY, yaw].
+const RACK_DX = -0.14;          // CONVEYOR: the bottle rack sits 14 cm further back on the desk (the herb tray took its front)
+const SPACE_LAYOUT = (() => {
+  const TH = 1.1065, C = [0.526 + RACK_DX, -0.567], at = (a, b) => [C[0] + 0.448 * a + 0.894 * b, C[1] - 0.894 * a + 0.448 * b];
+  const shelf = (a, fy) => [...at(a, 0), fy + 0.001, TH];
+  return { bottles: { fairySugar: shelf(-0.13, 1.120), starDust: shelf(0, 1.120), turmeric: shelf(0.13, 1.120), coconutOil: shelf(-0.07, 0.919), benzoin: shelf(0.07, 0.919) } };
+})();
+const fireLevel = { k: 1 };
+function onRoom(gltf) {
+  const root = gltf.scene;
+  scene.add(root);
+
+  // glTF brings the punctual lights in; thin them out so the shader stays sane
+  const lights = [];
+  // stray lights floating mid-room (they paint hot blobs/streaks on the floor)
+  const STRAY = /^(FireGlow|FloorWarm|Light)$/;
+  root.traverse(o => { if (o.isLight && !STRAY.test(o.name)) lights.push(o); });
+  root.traverse(o => { if (o.isLight && STRAY.test(o.name)) o.visible = false; });
+  lights.sort((a, b) => b.intensity - a.intensity);
+  // glTF hands over Blender's watts as candela, which blows out under three's AgX.
+  // One global scale brings it back to the Blender look; tune with the 조명 slider.
+  lights.forEach((l, i) => {
+    if (i >= (LITE ? 3 : 18)) { l.parent.remove(l); return; }   // keep the christmas strings alive (desktop)
+    if (l.name === 'DaySun') l.intensity *= 0.12;   // darker night outside
+    else l.color.multiply(WARM_TINT);               // warmer room lights
+    l.userData.baseIntensity = l.intensity;
+    l.intensity *= LIGHT_SCALE;
+    l.castShadow = !LITE && i < 2;              // only the hearth and the desk spot cast
+    if (l.castShadow) {
+      l.shadow.mapSize.set(1024, 1024);
+      l.shadow.bias = -0.0012;
+      l.shadow.normalBias = 0.02;
+      if (l.shadow.camera.far !== undefined) l.shadow.camera.far = 12;
+      shadowCasters.push(l);
+    }
+    keptLights.push(l);
+  });
+
+  // Blender area lights are not part of KHR_lights_punctual - rebuild them here
+  const AREA = [
+    { pos:[0.3362,-1.065,2.109], dir:[-0.1534,-0.179,-0.9718], w:1.5, h:0.25, watts:6.5 },
+    { pos:[-1.02, 0.948,0.825],  dir:[-0.0797, 0.0,  0.9968],  w:1.2, h:0.25, watts:4.5 }
+  ];
+  for (const a of (LITE ? [] : AREA)) {                 // RectAreaLights are expensive: desktop only
+    const L = new THREE.RectAreaLight(new THREE.Color().setRGB(1.0, 0.62, 0.38, THREE.LinearSRGBColorSpace),
+                                      a.watts * 0.86, a.w, a.h);
+    L.position.copy(B2T(a.pos));
+    L.lookAt(B2T(a.pos).add(B2T(a.dir)));
+    L.userData.baseIntensity = L.intensity;
+    rectLights.push(L);
+    scene.add(L);
+  }
+
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    if (/^Hang(Bag|Coat|Hat|Scarf)/.test(o.name)) { o.visible = false; return; }  // clear the coat rack
+    o.castShadow = true; o.receiveShadow = true;
+    o.frustumCulled = true;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) {
+      if (!m) continue;
+      if (m.map) {
+        m.map.anisotropy = LITE ? 1 : 4;
+        // the baked albedo is flat and pale - a warm tint multiplies into it so the
+        // room reads like candlelight instead of a white box
+        if (/^BK_/.test(m.name)) m.color.setRGB(0.95, 0.80, 0.63, THREE.LinearSRGBColorSpace);
+      }
+      // thin cloth, leaves and paper read better lit from both sides
+      if (/leaf|vine|curtain|fir|plant|scarf|coat|snow|flame|ribbon/i.test(m.name)) m.side = THREE.DoubleSide;
+      if (m.name === 'OutSky') { m.color.multiplyScalar(0.12); if (m.emissive) m.emissiveIntensity = 0; }   // replaced by the gradient shader below
+      if (m.name === 'OutSnow') {          // moonlit snow: dim blue-white (was too dark -> black ground and black tree tops)
+        m.color.setRGB(0.20, 0.25, 0.36, THREE.LinearSRGBColorSpace);          // dark moonlit snow
+        m.emissive.setRGB(0.02, 0.03, 0.065, THREE.LinearSRGBColorSpace); m.emissiveIntensity = 1;   // well under the bloom threshold
+      }
+      if (m.name === 'Snow') m.color.setRGB(0.30, 0.38, 0.55, THREE.LinearSRGBColorSpace);   // snow on the window bars: night-blue, not warm cream
+      if (m.name === 'OutPine') m.emissive.setRGB(0.012, 0.06, 0.08, THREE.LinearSRGBColorSpace);
+      if (/glass/i.test(m.name)) {        // window + lantern glass: see through it
+        m.transparent = true; m.depthWrite = false; m.side = THREE.DoubleSide;
+        m.roughness = Math.min(m.roughness, 0.08); m.metalness = 0;
+        if (m.opacity > 0.4) m.opacity = 0.14;
+        if (m.name === 'GlassClear') { m.color.set(0x0a1424); m.opacity = 0.1; m.roughness = 0.02; m.envMapIntensity = 0; }  // window pane
+        o.castShadow = false;
+      }
+      if (/flame|bulb|glow|led/i.test(m.name) && m.emissive) m.emissiveIntensity = Math.max(m.emissiveIntensity, 2.0);
+    }
+  });
+
+  // stylized fireplace flame: flat-shaded layered tongues (unlit, bloom-friendly) + embers + flickering light
+  // the 'Fire' node is the whole fireplace; the logs are three of its children (their local y is ~ -1)
+  const fireNode = root.getObjectByName('Fire'); root.updateMatrixWorld(true);
+  const logBox = new THREE.Box3();
+  fireNode.children.filter(c => /^Cube.?(005|016|021)$/.test(c.name)).forEach(c => logBox.expandByObject(c));
+  const fp = logBox.getCenter(new THREE.Vector3()); fp.y = logBox.max.y - 0.02;
+  const fireScale = THREE.MathUtils.clamp(Math.max(logBox.getSize(new THREE.Vector3()).x, logBox.getSize(new THREE.Vector3()).z) / 0.5, 0.5, 1.5);
+  console.log('fire at', fp.toArray(), 'logs', logBox.min.toArray(), logBox.max.toArray());
+  SPACE_LAYOUT.chimney = fp.clone().add(new THREE.Vector3(0.03, 0.32, 0));   // gifts leave and come back through the fireplace
+  fireFx.light = new THREE.PointLight(0xff7a2a, 1.6, 6, 2);
+  fireFx.light.position.copy(fp).y += 0.2;
+  scene.add(fireFx.light);
+  window.Audio3D.loopAt('fire', fp.clone().setY(fp.y + 0.1), 0.9, 0.7, 1.5);               // crackling, positional
+  const prof = [[0,0],[.5,.04],[.62,.25],[.42,.55],[.2,.82],[0,1]].map(([r,y]) => new THREE.Vector2(r, y));
+  const flameGeo = new THREE.LatheGeometry(prof, 10);
+  const layers = [[0xff3d10, 1.0], [0xff9a1e, 0.72], [0xffe27a, 0.42]].map(([c, k]) => {
+    const col = new THREE.Color(c).multiplyScalar(0.85);      // <1: values above 1 get washed to pale pink by the tone mapper
+    return { k, mat: new THREE.MeshBasicMaterial({ color: col, toneMapped: false }) };
+  });
+  const flame = new THREE.Group(); flame.position.copy(fp); flame.scale.setScalar(fireScale); scene.add(flame);
+  fireFx.setLevel = (k) => { fireLevel.k = k; flame.scale.setScalar(fireScale * Math.max(0.05, k)); flame.visible = k > 0.02; embers.visible = k > 0.3; };   // the flow lights the fire
+  const tongues = [[0,0,.2,1],[.07,.03,.15,.8],[-.07,-.02,.16,.85],[.03,-.07,.12,.65],[-.04,.07,.13,.7]];
+  for (const [x, z, w, h] of tongues) {
+    const t = new THREE.Group(); t.position.set(x, 0, z); t.userData = { w, h, ph: Math.random() * 6.28 };
+    for (const L of layers) { const m = new THREE.Mesh(flameGeo, L.mat); m.scale.set(w * L.k, 0.3 * h * L.k, w * L.k); t.add(m); }
+    flame.add(t);
+  }
+  const N = 14, ePos = new Float32Array(N * 3), eSeed = Array.from({ length: N }, () => Math.random());
+  const eGeo = new THREE.BufferGeometry(); eGeo.setAttribute('position', new THREE.BufferAttribute(ePos, 3));
+  const embers = new THREE.Points(eGeo, new THREE.PointsMaterial({ color: new THREE.Color(0xffb040).multiplyScalar(1.6), size: 0.012, toneMapped: false, transparent: true, depthWrite: false }));
+  embers.frustumCulled = false; scene.add(embers);
+  fireFx.tick = (t) => {
+    flame.children.forEach((g, i) => {
+      const u = g.userData, n = Math.sin(t*9 + u.ph) * .5 + Math.sin(t*17.3 + u.ph*2) * .5;
+      g.scale.set(1 + n*.08, 1 + n*.22, 1 + n*.08);
+      g.rotation.z = Math.sin(t*3 + u.ph) * .12; g.rotation.x = Math.cos(t*2.6 + u.ph) * .12;
+    });
+    for (let i = 0; i < N; i++) {
+      const k = (t * 0.35 + eSeed[i]) % 1;
+      ePos[i*3]   = fp.x + (eSeed[i] - .5) * .2 + Math.sin(t*2 + i) * .03 * k;
+      ePos[i*3+1] = fp.y + 0.05 + k * 0.7;
+      ePos[i*3+2] = fp.z + (((eSeed[i] * 7) % 1) - .5) * .2;
+    }
+    eGeo.attributes.position.needsUpdate = true;
+  };
+
+  // hanging plants sway: world-space vertex offset, strongest at the free end below the anchor
+  root.traverse(o => {
+    if (!o.isMesh || !/^(DecoVine_|Mistletoe_)/.test(o.name)) return;
+    const anchor = new THREE.Box3().setFromObject(o).max.y;
+    o.material = o.material.clone();
+    o.material.userData.keep = true;                // sway shader: must stay a Standard material (see the Quest pass)
+    o.material.onBeforeCompile = (sh) => {
+      sh.uniforms.uT = swayT; sh.uniforms.uAnchor = { value: anchor };
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float uT; uniform float uAnchor;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
+          float k = clamp((uAnchor - wp.y) / 0.4, 0.0, 1.0); k *= k;
+          transformed += vec3(sin(uT*1.4 + wp.y*3.0 + wp.x*2.0), 0.0, cos(uT*1.1 + wp.y*2.5 + wp.z*2.0)) * 0.025 * k;`);
+    };
+  });
+
+
+  // snow: baked far flakes (OutFlake) looked like rain streaks -> hidden; round soft dots fall outside the window instead
+  root.traverse(o => { if (o.isMesh && o.material && o.material.name === 'OutFlake') o.visible = false; });
+  // ---- night outside: gradient sky + stars, warm fairy lights in the pines, two layers of falling snow
+  // outside pines: spots are collected here; the model (assets/trees.glb) is instanced onto them once it has been parsed
+  const pines = [];
+  function buildPine(x, y0, z, H, R) { pines.push({ x, y0, z, H, R }); }
+
+  const dc = document.createElement('canvas'); dc.width = dc.height = 32;
+  const dg = dc.getContext('2d'), dr = dg.createRadialGradient(16,16,0,16,16,16);
+  dr.addColorStop(0,'rgba(255,255,255,1)'); dr.addColorStop(1,'rgba(255,255,255,0)'); dg.fillStyle = dr; dg.fillRect(0,0,32,32);
+  const dotTex = new THREE.CanvasTexture(dc);
+  root.traverse(o => {
+    if (o.name === 'OutBackdrop') o.material = new THREE.ShaderMaterial({
+      uniforms: { uT: swayT }, depthWrite: false,
+      vertexShader: 'varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+      fragmentShader: `varying vec3 vW; uniform float uT;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        void main(){
+          float k = smoothstep(-2.0, 28.0, vW.y);
+          vec3 c = mix(vec3(0.030, 0.060, 0.150), vec3(0.003, 0.007, 0.028), k);
+          vec2 cell = floor(vW.zy * 5.0); float r = h(cell);
+          float star = step(0.985, r) * (0.5 + 0.5 * sin(uT * 2.0 + r * 40.0)) * smoothstep(6.0, 18.0, vW.y);
+          gl_FragColor = vec4(c + vec3(0.35, 0.4, 0.55) * star * 0.5, 1.0);
+        }`
+    });
+    if (/^OutPine(Snow)?\d+$/.test(o.name)) o.visible = false;   // the old blobby cones are replaced by tiered snowy pines below
+    if (/^OutPine\d+$/.test(o.name)) {
+      const bb = new THREE.Box3().setFromObject(o), sz = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+      buildPine(c.x, bb.min.y, c.z, sz.y * 2.4, sz.x * 0.5 * 2.2);
+    }
+  });
+  // trees.glb: ONE snowy fir (1660 tris, 3 x 2K textures). Instanced onto every pine spot, random yaw / size, moonlit material
+  // (base colour only: the metal-rough + normal maps are dropped - invisible at 5-25 m and expensive). Fairy lights are sampled
+  // from the model's own vertices so they sit on the branches.
+  loader.parse(Uint8Array.from(atob(window.TREES_GLB_B64), c => c.charCodeAt(0)).buffer, '', (tg) => {
+    let src = null; tg.scene.traverse(o => { if (o.isMesh && !src) src = o; });
+    const geo = src.geometry, bb = (geo.computeBoundingBox(), geo.boundingBox), hh = bb.max.y - bb.min.y;
+    const tex = src.material.map, im = tex.image;
+    if (im && im.width > 1024) { const c = document.createElement('canvas'); c.width = c.height = 1024; c.getContext('2d').drawImage(im, 0, 0, 1024, 1024); tex.image = c; }
+    tex.needsUpdate = true; tex.anisotropy = 1;
+    const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide,                     // unlit: far away, night-tinted by colour only
+      color: new THREE.Color().setRGB(0.10, 0.14, 0.23, THREE.LinearSRGBColorSpace) });
+    const inst = new THREE.InstancedMesh(geo, mat, pines.length), M = new THREE.Matrix4(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), S = new THREE.Vector3(), V = new THREE.Vector3();
+    const pos = geo.attributes.position;
+    pines.forEach((p, i) => {
+      const k = (p.H / hh) * (0.85 + Math.random() * 0.3);
+      Q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * 6.28);
+      P.set(p.x, p.y0 - bb.min.y * k, p.z); S.set(k, k, k);
+      inst.setMatrixAt(i, M.compose(P, Q, S));
+    });
+    inst.frustumCulled = false; scene.add(inst);
+  }, e => showErr('trees.glb: ' + e.message));
+  const snowLayers = [   // [count, xRange, yRange, zRange, dotSize, fallSpeed, opacity]
+    [LITE ? 600 : 1400, [-6, -1.25], [-1, 4], [-3.5, 3.5], 0.03, 0.3, 0.85],
+    [LITE ? 700 : 1800, [-26, -6],   [-1, 11], [-14, 14],  0.16, 0.9, 0.6]
+  ].map(([N, X, Y, Z, size, v, op]) => {
+    const P = new Float32Array(N * 3), S = new Float32Array(N);
+    for (let i = 0; i < N; i++) { P[i*3] = X[0] + Math.random() * (X[1]-X[0]); P[i*3+1] = Y[0] + Math.random() * (Y[1]-Y[0]);
+      P[i*3+2] = Z[0] + Math.random() * (Z[1]-Z[0]); S[i] = v * (0.6 + Math.random() * 0.8); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+    const pts = new THREE.Points(g, new THREE.PointsMaterial({ map: dotTex, color: 0x9fb0d8, size, transparent: true, depthWrite: false, opacity: op }));
+    pts.frustumCulled = false; scene.add(pts); return { N, P, S, g, Y };
+  });
+  fireFx.snow = (t, dt) => {
+    for (const L of snowLayers) {
+      for (let i = 0; i < L.N; i++) {
+        let y = L.P[i*3+1] - L.S[i] * dt; if (y < L.Y[0]) y = L.Y[1];
+        L.P[i*3+1] = y; L.P[i*3] += Math.sin(t * 0.8 + i) * 0.12 * dt;
+      }
+      L.g.attributes.position.needsUpdate = true;
+    }
+  };
+
+  // mist: light exponential fog (far trees melt into the horizon colour; the room is barely touched)
+  // + a few big soft sprites drifting low outside the window
+  scene.fog = new THREE.FogExp2(new THREE.Color().setRGB(0.015, 0.03, 0.075, THREE.LinearSRGBColorSpace), 0.04);
+  const mist = [];
+  for (let i = 0; i < (LITE ? 5 : 14); i++) {                // big transparent sprites = overdraw: few on Quest
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, color: new THREE.Color().setRGB(0.04, 0.07, 0.15, THREE.LinearSRGBColorSpace),
+      transparent: true, opacity: 0.16 + Math.random() * 0.08, depthWrite: false, fog: false }));
+    sp.position.set(-4 - Math.random() * 16, 0.3 + Math.random() * 2.2, (Math.random() - .5) * 18);
+    sp.scale.set(6 + Math.random() * 6, 2 + Math.random() * 1.5, 1); sp.userData = { sp: 0.15 + Math.random() * 0.25, ph: Math.random() * 6.28 };
+    scene.add(sp); mist.push(sp);
+  }
+  const snowTick = fireFx.snow;
+  fireFx.snow = (t, dt) => {
+    snowTick(t, dt);
+    for (const m of mist) { m.position.z += m.userData.sp * dt; if (m.position.z > 10) m.position.z = -10; m.position.y += Math.sin(t * 0.3 + m.userData.ph) * 0.1 * dt; }
+  };
+
+  // window garland: shrink the bare bulbs, tone them down, and give each a soft halo instead of a hard glare
+  root.traverse(o => {
+    if (!o.isMesh || !/^GLBWIN_.*Bulb/.test(o.name)) return;
+    o.updateWorldMatrix(true, false);
+    const gp = o.geometry.attributes.position, thr = 0.022 / o.getWorldScale(new THREE.Vector3()).x, cl = [];
+    const v = new THREE.Vector3(), owner = new Int32Array(gp.count);
+    for (let i = 0; i < gp.count; i++) {
+      v.fromBufferAttribute(gp, i); let k = cl.findIndex(c => c.c.distanceTo(v) < thr);
+      if (k < 0) { cl.push({ c: v.clone(), n: 1 }); k = cl.length - 1; } else { const c = cl[k]; c.c.multiplyScalar(c.n).add(v).multiplyScalar(1 / ++c.n); }
+      owner[i] = k;
+    }
+    for (let i = 0; i < gp.count; i++) { const c = cl[owner[i]].c; v.fromBufferAttribute(gp, i).sub(c).multiplyScalar(0.6).add(c); gp.setXYZ(i, v.x, v.y, v.z); }
+    gp.needsUpdate = true;
+    o.material = o.material.clone(); o.material.emissiveIntensity = 1.3;
+    for (const c of cl) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, color: new THREE.Color(1.0, 0.68, 0.3), transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending }));
+      sp.position.copy(o.localToWorld(c.c.clone())); sp.scale.setScalar(0.12); sp.userData.ph = Math.random() * 6.28;
+      scene.add(sp); fireFx.halos.push(sp);
+    }
+  });
+
+  // soft warm fill: two low, wide lamps (no shadows) so shadows/contrast stay intact
+  for (const p of (LITE ? [[0.1, 1.8, -0.2]] : [[0.3, 1.8, 0.3], [-0.4, 1.7, -0.7]])) {
+    const w = new THREE.PointLight(0xff9448, 1.1, 7, 2);
+    w.position.set(...p); scene.add(w);
+  }
+
+  // Reachability for a player who stays put at (1.07, 0), facing -x (right = -z in three, +y in Blender).
+  // Checked against the Blender scene: the side desk (plank Cube.002, top z=0.70) runs along x at 0.82..1.22 m to the
+  // player's right, and the herb tray sits on it. Move that desk as a whole to 0.36..0.76 m, trim its end where it would
+  // run into the main desk (x < 0.82: it now butts against the main desk's side), and shrink the tray + pot spacing to
+  // fit the player's width. glTF names lose the dot: "Cube.002" -> "Cube002".
+  const DESK_SHIFT = 0.46;                    // metres towards the player (three +z)
+  const sideDesk = root.getObjectByName('Cube002'), deskLeg = root.getObjectByName('Cube024');
+  const trayN = root.getObjectByName('HerbTray');
+  root.updateMatrixWorld(true);
+  if (sideDesk && sideDesk.isMesh) {          // trim in world space (the plank node is rotated 90 deg)
+    const inv = sideDesk.matrixWorld.clone().invert(), P = sideDesk.geometry.attributes.position, V = new THREE.Vector3();
+    for (let i = 0; i < P.count; i++) {
+      V.fromBufferAttribute(P, i).applyMatrix4(sideDesk.matrixWorld); if (V.x < 0.82) V.x = 0.82;
+      V.applyMatrix4(inv); P.setXYZ(i, V.x, V.y, V.z);
+    }
+    P.needsUpdate = true; sideDesk.geometry.computeBoundingBox(); sideDesk.geometry.computeBoundingSphere();
+  }
+  [sideDesk, deskLeg, trayN].forEach(o => o && (o.position.z += DESK_SHIFT));
+  // the two-tier rack stood on the part of the side desk that was just trimmed away (it floated): put it on the main desk
+  const rack = root.getObjectByName('HerbTray002'); if (rack) rack.position.z += 0.35;
+  // desk height 0.70 -> 0.90 m (comfortable for hands at chest height): lift desks + everything resting on them,
+  // and stretch the legs by moving their top vertices up (world y > 0.3)
+  const LIFT = 0.2;
+  ['Desk', 'Cube008', 'Cube002', 'Cube011', 'MugCup', 'HerbTray', 'HerbTray002', 'book', 'bookcover', 'CTRL_quill', 'InkQuill']
+    .forEach(n => { const o = root.getObjectByName(n); if (o && o.parent === root) o.position.y += LIFT; });
+  // bookshelf (with its rolls, drawer and the mistletoe hanging from its board) 0.25 m towards the player (three -z), so the
+  // paper rolls are in reach; the desk's far end (z > 0.78) is cut off so the two don't run into each other
+  const SHELF_SHIFT = 0.15;                   // metres towards the player (negative = pushed back from its original spot); the drawer stays inside
+  ['BookShelf', 'CTRL_Mistletoe'].forEach(n => { const o = root.getObjectByName(n); if (o && o.parent === root) o.position.z -= SHELF_SHIFT; });
+  root.updateMatrixWorld(true);
+  ['Desk', 'Cube008'].forEach(n => {
+    const o = root.getObjectByName(n); if (!o || !o.isMesh) return;
+    const inv = o.matrixWorld.clone().invert(), P = o.geometry.attributes.position, V = new THREE.Vector3();
+    for (let i = 0; i < P.count; i++) { V.fromBufferAttribute(P, i).applyMatrix4(o.matrixWorld); if (V.z > 0.68) V.z = 0.68; V.applyMatrix4(inv); P.setXYZ(i, V.x, V.y, V.z); }
+    P.needsUpdate = true; o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere();
+  });
+  // tree: 0.12 into the room, then 0.15 to the player's RIGHT (player faces -x, right = Blender +y = three -z): net three z -0.03
+  ['CTRL_tree', 'CTRL_gifts', 'TreeGlow', 'TreeTop', 'TreeAccent0', 'TreeAccent1', 'TreeAccent2']
+    .forEach(n => { const o = root.getObjectByName(n); if (o && o.parent === root) o.position.z -= 0.03; });
+  // door: closed by default (the leaf's pivot is its hinge, so zero rotation = shut). Kept dynamic so it can be animated later.
+  const doorLeaf = root.getObjectByName('DoorLeaf');
+  if (doorLeaf) { doorLeaf.quaternion.identity(); doorLeaf.matrixAutoUpdate = true; doorLeaf.userData.dynamic = true; window.doorLeaf = doorLeaf; }
+  // ---- bookshelf: back to where it was (whole shelf 0.20 up, like the desk), and ONLY the first floor's ceiling comes down by
+  // SHELF_DROP. So: the shelf bottom, its position and its contact with the desk are exactly as before; the 2nd-floor board is at
+  // 0.90 - SHELF_DROP, the boards above follow. The shelf is one 40-vertex box mesh: vertices below y=0.3 (bottom slab) move
+  // +0.20, everything above +0.20 - SHELF_DROP; the things standing in it (children) and the mistletoe follow.
+  const moveW = (o, dx, dy, dz) => { if (!o || !o.parent) return; const wp = o.getWorldPosition(new THREE.Vector3()); wp.x += dx; wp.y += dy; wp.z += dz; o.position.copy(o.parent.worldToLocal(wp)); };
+  const SHELF_LIFT = 0.20, SHELF_DROP = 0.00, shelf = root.getObjectByName('BookShelf');
+  root.updateMatrixWorld(true);
+  if (shelf && shelf.isMesh) {
+    const inv = shelf.matrixWorld.clone().invert(), P = shelf.geometry.attributes.position, V = new THREE.Vector3();
+    for (let i = 0; i < P.count; i++) { V.fromBufferAttribute(P, i).applyMatrix4(shelf.matrixWorld); V.y += V.y > 0.3 ? SHELF_LIFT - SHELF_DROP : SHELF_LIFT; V.applyMatrix4(inv); P.setXYZ(i, V.x, V.y, V.z); }
+    P.needsUpdate = true; shelf.geometry.computeBoundingBox(); shelf.geometry.computeBoundingSphere();
+    [...shelf.children].forEach(c => moveW(c, 0, SHELF_LIFT - SHELF_DROP, 0));
+  }
+  moveW(root.getObjectByName('CTRL_Mistletoe'), 0, SHELF_LIFT - SHELF_DROP, 0);
+  root.updateMatrixWorld(true);
+  // paper rolls (rack 35 % smaller) go up into the 3rd floor (board top = 1.34 + SHELF_LIFT - SHELF_DROP); the drawer cabinet takes the rack's old
+  // spot on the 2nd floor, centred at x = 1.01, 4 cm forward
+  const rollRack = root.getObjectByName('PaperRollRack'); if (rollRack) rollRack.scale.multiplyScalar(0.65);
+  root.updateMatrixWorld(true);
+  moveW(rollRack, 0.12, 0.60, 0);                          // pivot x 1.01 -> 1.13, base 0.84 -> 1.44
+  moveW(root.getObjectByName('MaterialDrawer'), 0.50, 0, -0.04);
+  // ---- CONVEYOR: the work tables pass in front of the player from the right wall to the left wall, and the bookshelf stood right in
+  // that lane. The paper rolls (-> the wrapping table) and the drawer cabinet (-> the making table) leave the shelf, then the shelf
+  // (with its books, angel and mistletoe) moves SHELF_BACK metres back (+x, behind the player's left).
+  const SHELF_BACK = 0.62;
+  root.updateMatrixWorld(true);
+  ['PaperRollRack', 'MaterialDrawer'].forEach(n => { const o = root.getObjectByName(n); if (o) root.attach(o); });
+  ['BookShelf', 'CTRL_Mistletoe'].forEach(n => moveW(root.getObjectByName(n), SHELF_BACK, 0, 0));
+  root.updateMatrixWorld(true);
+  // hand-painted cabinet (Substance Painter, from export/Drawers.fbx): every part gets its repainted geometry (new UVs, one shared
+  // layout per material) and the matching painted texture set. The new geometry is in metres with its origin at the bottom centre of the
+  // whole cabinet; it is dropped on the cabinet's current bottom centre and converted back into each part's own local space, so the
+  // parts keep their nodes, names and transforms (DrawerSet still opens the same meshes). Base colour + normal map, Lambert.
+  { const cab0 = root.getObjectByName('MaterialDrawer'), DP = window.DRAWERS_PAINTED;
+    if (cab0 && DP) {
+      root.updateMatrixWorld(true);
+      const bx = new THREE.Box3().setFromObject(cab0), ctr = new THREE.Vector3((bx.min.x + bx.max.x) / 2, bx.min.y, (bx.min.z + bx.max.z) / 2);
+      const b64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0)).buffer;
+      const ld = (u, srgb) => { const t = new THREE.TextureLoader().load(u); t.flipY = false; t.anisotropy = 1; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter;   // no mips: tiny UV islands bleed grey padding into the bevels
+        if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; };
+      // Painter shows the textures under a bright studio HDRI; here the room is lit by a few dim warm lamps, so the same unlit-by-baking
+      // colours come out far too dark. DRAWER_GAIN multiplies the colour; the emissive term is a small fill (like the light that used to be
+      // baked into the old textures) that keeps the shadow side from going black.
+      const DRAWER_GAIN = 1.45, DRAWER_FILL = 0.08;
+      const mk = (b, n) => { const m = ld(DP.tex[b + '_base'], true);
+        return new THREE.MeshLambertMaterial({ map: m, color: new THREE.Color(DRAWER_GAIN, DRAWER_GAIN, DRAWER_GAIN), emissive: new THREE.Color(DRAWER_FILL, DRAWER_FILL * 0.9, DRAWER_FILL * 0.85), emissiveMap: m,
+          normalMap: ld(DP.tex[b + '_normal']), normalScale: new THREE.Vector2(n, n) }); };
+      const MAT = { Drawer_Wood: mk('wood', 0.8), Drawer_Metal: mk('metal', 0.8), Drawer_Paper: mk('paper', 0.8) };
+      const norm = n => n.replace(/[._]/g, ''), byName = {};
+      cab0.traverse(o => { if (o.isMesh) byName[norm(o.name)] = o; });
+      let n = 0;
+      for (const [k, d] of Object.entries(DP.parts)) {
+        const o = /^MaterialDrawer/.test(k) ? cab0 : byName[norm(k)]; if (!o) continue;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(b64(d.pos)), 3));
+        g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(b64(d.nrm)), 3));
+        g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(b64(d.uv)), 2));
+        g.setIndex(new THREE.BufferAttribute(new Uint32Array(b64(d.idx)), 1));
+        g.translate(ctr.x, ctr.y, ctr.z); o.updateWorldMatrix(true, false); g.applyMatrix4(o.matrixWorld.clone().invert());
+        o.geometry = g; o.material = MAT[d.mat] || MAT.Drawer_Wood; n++;
+      }
+      console.log('painted cabinet parts:', n, 'of', Object.keys(DP.parts).length);
+    } }
+  // ---- desk top cleared: the desk mat, inkwell, quill and open book are removed (not just hidden: hidden meshes would still be hit by the drop rays)
+  ['Cube011', 'InkQuill', 'CTRL_quill', 'book', 'bookcover'].forEach(n => { const o = root.getObjectByName(n); if (o) o.removeFromParent(); });
+  // ---- the herb pots lost their rim in the Blender decimation (gaps in the lip): rebuild each as a closed lathe pot of the same size/colour
+  ['Lavender', 'Lemongrass', 'Mint', 'Rose'].forEach(n => {
+    const o = root.getObjectByName('DeskPot_' + n); if (!o || !o.isMesh) return;
+    o.geometry.computeBoundingBox(); const bb = o.geometry.boundingBox, R = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2, H = bb.max.y - bb.min.y;
+    const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
+    const prof = [[0.001, 0], [0.58, 0], [0.64, 0.04], [0.86, 0.74], [0.97, 0.76], [1.0, 0.80], [1.0, 0.99], [0.96, 1.0], [0.86, 1.0], [0.84, 0.92], [0.80, 0.30], [0.001, 0.26]].map(([r, y]) => new THREE.Vector2(r * R, y * H));
+    const g = new THREE.LatheGeometry(prof, 24); g.translate(cx, bb.min.y, cz); o.geometry = g;
+  });
+  // ---- all books leave the shelf. Props: hearth table (east of the shelf against the left wall) with the turntable on it, a
+  // pick-up-able angel on the 3rd floor, the snowman on top of the coat rack, the reindeer in front of the tree.
+  // A jukebox plays the BGM in turns (needs a click / key / XR start to begin).
+  const bookBox = new THREE.Box3(); let nb = 0;
+  for (let i = 0; i < 16; i++) { const o = root.getObjectByName('Book_' + String(i).padStart(2, '0')); if (!o) continue;
+    if (i <= 12) { bookBox.union(new THREE.Box3().setFromObject(o)); nb++; } o.visible = false; }
+  // paper name tags (modules/nametag) on the 6 small drawers, where the old plates were. They are children of the plate node, so they
+  // slide out with the drawer; the plate itself is made invisible. Change the words here.
+  // the cabinet holds the flow's six drawer ingredients (Drawer002..007 = rosewood..ginger, see modules/flow.js L.drawers)
+  const TAG_TEXT = ['Rosewood', 'Cedarwood', 'Cinnamon', 'Vanilla', 'Eucalyptus', 'Ginger'];
+  const paperTags = (rootNode) => {
+    const make = window.createNameTag; if (typeof make !== 'function') return;
+    for (let i = 1; i <= 6; i++) {
+      const plate = rootNode.getObjectByName('NameTag00' + i); if (!plate) continue;
+      rootNode.updateMatrixWorld(true);
+      const bb = new THREE.Box3().setFromObject(plate), c = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3());
+      // pose worked out now, in the plate's own space: the cabinet is moved onto the conveyor desk before the tag finishes loading,
+      // and the tag has to stay on its drawer front wherever the cabinet goes
+      const pq = plate.getWorldQuaternion(new THREE.Quaternion()), ps = plate.getWorldScale(new THREE.Vector3());
+      const tq = pq.invert().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI));   // faces the drawer front
+      const tp = plate.worldToLocal(c.clone().add(new THREE.Vector3(0, 0, -0.003 - sz.z / 2)));
+      make({ text: TAG_TEXT[i - 1], width: Math.max(sz.x, sz.y) * 1.25, color: '#3b2412', curl: 0.0012 }).then(tag => {
+        tag.quaternion.copy(tq); tag.scale.set(1 / ps.x, 1 / ps.y, 1 / ps.z); tag.position.copy(tp);
+        plate.add(tag); plate.material = new THREE.MeshBasicMaterial({ visible: false });
+      }).catch(e => console.error('nametag', e));
+    }
+  };
+  const setupProps = () => {                                  // run once the HerbGarden (input hub) exists, see below
+    if (!nb) return;
+    const PLAYER = { x: 1.07, z: 0 }, face = (x, z) => Math.atan2(PLAYER.x - x, PLAYER.z - z);     // yaw that turns a model's +z front towards the player
+    const BGM = ['Sleigh-Bell Shuffle.mp3', 'Untitled.mp3', 'Vintage Christmas Jazz.mp3'].map(n => '../Sound/BGM/' + encodeURIComponent(n));
+    jukebox = new Jukebox(BGM.length); window.jukebox = jukebox;
+    // table: model is 0.82 high, top surface 0.407 above its centre; scale 0.8 -> 0.66 m high, 0.76 m across
+    const TB = new THREE.Vector3(2.2, 0.005, 0.25), TS = 0.8, tableTop = TB.y + (0.413 + 0.407) * TS;
+    const table = new Prop(scene, 'table', { scale: TS, position: TB, rotationY: 0, garden });
+    if (garden) garden.colliders.push(table.mesh);                                              // things can be set down on it
+    const TT = 0.42;
+    turntable = new Turntable(scene, { position: new THREE.Vector3(TB.x, tableTop + 0.144 * TT, TB.z), scale: TT, rotationY: face(TB.x, TB.z), jukebox });
+    jukebox.setPosition(new THREE.Vector3(TB.x, tableTop + 0.1, TB.z));                          // the music comes out of the turntable
+    const c = bookBox.getCenter(new THREE.Vector3()), boardY = bookBox.min.y - 0.03;            // 3rd floor, left part (where the books were)
+    new Prop(scene, 'angel', { scale: 0.30, position: new THREE.Vector3(c.x, boardY, c.z), rotationY: face(c.x, c.z), grab: true, garden });
+    new Prop(scene, 'snow', { scale: 0.32, position: new THREE.Vector3(2.25, 1.55, -1.955), rotationY: face(2.25, -1.955), garden });   // coat-rack board top y=1.55
+    new Prop(scene, 'deer', { scale: 0.45, position: new THREE.Vector3(1.95, 0.012, -0.40), rotationY: face(1.95, -0.40), garden });   // tree centre is at Blender y 1.23, its front edge ~0.46
+    // bottles, lemon and knife (kitchen.js) are built by the flow (modules/flow.js) so they can be poured and cut there
+    const go = () => jukebox.start();
+    ['pointerdown', 'keydown'].forEach(ev => addEventListener(ev, go, { passive: true }));
+    renderer.xr.addEventListener('sessionstart', go);
+    const mb = document.getElementById('music');
+    mb.onclick = () => { mb.setAttribute('aria-pressed', String(jukebox.toggle())); };
+  };
+  ['Cube010', 'Cube023', 'Cube024'].forEach(n => {
+    const o = root.getObjectByName(n); if (!o || !o.isMesh) return;
+    o.updateWorldMatrix(true, false); const inv = o.matrixWorld.clone().invert(), P = o.geometry.attributes.position, V = new THREE.Vector3();
+    for (let i = 0; i < P.count; i++) { V.fromBufferAttribute(P, i).applyMatrix4(o.matrixWorld); if (V.y > 0.3) V.y += LIFT; V.applyMatrix4(inv); P.setXYZ(i, V.x, V.y, V.z); }
+    P.needsUpdate = true; o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere();
+  });
+  { const leg = root.getObjectByName('Cube024'); if (leg && leg.parent) { const c = leg.clone(); c.name = 'Cube024_b'; c.position.z -= 0.30; leg.parent.add(c); } }   // missing leg of the side desk
+  // the mug sits on the desk corner next to the side desk (the small drawer cabinet stays inside the bookshelf)
+  const mugNode = root.getObjectByName('MugCup');
+  if (mugNode) mugNode.position.set(0.76, mugNode.position.y, -0.27);   // right of the cutting board, clear of the flow's stations
+  // the hand-painted mug (made in Substance Painter from export/Mug.fbx): replace the cup + handle meshes by the painted ones. The new
+  // geometry is in metres, yaw-correct, origin at the bottom centre of cup+handle - the same convention MugModule measures - so it is
+  // dropped on the old mug's bottom centre. Base colour only, Lambert (cheap).
+  if (mugNode && window.MUG_PAINTED) {
+    root.updateMatrixWorld(true);
+    const bx = new THREE.Box3().setFromObject(mugNode), MP = window.MUG_PAINTED;                      // old cup + old handle
+    const b64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0)).buffer;
+    const mk = d => { const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(b64(d.pos)), 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(b64(d.nrm)), 3));
+      g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(b64(d.uv)), 2));
+      g.setIndex(new THREE.BufferAttribute(new Uint32Array(b64(d.idx)), 1)); return g; };
+    const tex = new THREE.TextureLoader().load(MP.tex); tex.colorSpace = THREE.SRGBColorSpace; tex.flipY = false; tex.anisotropy = 1;
+    // the painterly look lives in the NORMAL map (brush strokes) and the roughness channel (patchy glaze) - base colour is plain -
+    // so this one small object keeps a Standard material with all three maps (R = occlusion, G = roughness, B = metallic)
+    const ld = u => { const t = new THREE.TextureLoader().load(u); t.flipY = false; t.anisotropy = 1; return t; };
+    const mugMat = new THREE.MeshStandardMaterial({ map: tex, normalMap: ld(MP.normal), roughnessMap: ld(MP.orm), metalnessMap: ld(MP.orm), roughness: 1, metalness: 1 });
+    // the exported roughness is low everywhere (0.1-0.3 = glossy / wet-looking here, where there is no environment map): lift the floor so
+    // the patchy variation stays but it reads as matte-satin ceramic. MUG_ROUGH_MIN: 0 = as painted, 1 = fully rough.
+    const MUG_ROUGH_MIN = 0.6;
+    mugMat.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n roughnessFactor = mix(' + MUG_ROUGH_MIN.toFixed(2) + ', 1.0, roughnessFactor);'); };
+    mugMat.customProgramCacheKey = () => 'mugrough'; mugMat.normalScale.set(0.7, 0.7);
+    [...mugNode.children].forEach(c => mugNode.remove(c));                                           // old handle (Torus)
+    mugNode.geometry = mk(MP.cup); mugNode.material = mugMat;
+    mugNode.position.set((bx.min.x + bx.max.x) / 2, bx.min.y, (bx.min.z + bx.max.z) / 2); mugNode.quaternion.identity(); mugNode.scale.setScalar(1);
+    mugNode.add(new THREE.Mesh(mk(MP.handle), mugMat));
+    mugNode.updateMatrixWorld(true);
+  }   // x 0.74, 0.12 m right of centre, on the desk
+  if (trayN) {
+    const names = ['Lavender', 'Mint', 'Lemongrass', 'Rose'];
+    const parts = n => ['DeskPot_', 'PotSoil_', 'Plant_'].flatMap(p => [p + n, p + n + '_Bloom', p + n + '_stem']).map(k => root.getObjectByName(k)).filter(Boolean);
+    const xc = names.map(n => new THREE.Box3().setFromObject(root.getObjectByName('DeskPot_' + n)).getCenter(new THREE.Vector3()).x);
+    const mean = xc.reduce((p, v) => p + v, 0) / xc.length;
+    names.forEach((n, i) => parts(n).forEach(o => o.position.x += (xc[i] - mean) * (0.75 - 1)));   // pots 25 % closer
+    const tg = trayN.geometry; tg.computeBoundingBox();                                           // tray mesh 22 % shorter
+    const cx = (tg.boundingBox.min.x + tg.boundingBox.max.x) / 2, tp = tg.attributes.position;
+    for (let i = 0; i < tp.count; i++) tp.setX(i, (tp.getX(i) - cx) * 0.78 + cx);
+    tp.needsUpdate = true; tg.computeBoundingBox(); tg.computeBoundingSphere();
+    trayN.position.x += 1.15 - mean;                                            // centre at the player's x (~1.07..1.15)
+  }
+  // ---- CONVEYOR table 1 (making): every ingredient on the one desk in front. Herb tray from the side desk -> front-right corner of the
+  // desk (turned along it), the bottle rack 14 cm further back to make room, the mug to the back, the left legs under the desk end.
+  // The drawer cabinet joins after DrawerSet is made (below). modules/conveyor.js moves the whole desk out through the left wall later.
+  const placeW = (o, yaw, x, z, dy = 0) => {        // turn an object about its own centre (world y axis) and put that centre at x, z
+    if (!o) return; scene.updateMatrixWorld(true);
+    const c = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), par = o.parent, piv = new THREE.Group();
+    scene.add(piv); piv.position.set(c.x, 0, c.z); piv.updateMatrixWorld(true); piv.attach(o);
+    piv.rotation.y = yaw; piv.position.set(x, dy, z); piv.updateMatrixWorld(true); par.attach(o); piv.removeFromParent();
+  };
+  placeW(trayN, Math.PI / 2, 0.695, -0.555);
+  moveW(root.getObjectByName('HerbTray002'), RACK_DX, 0, 0);
+  placeW(root.getObjectByName('MugCup'), 0, 0.26, -0.12);
+  ['Cube009', 'Cube026'].forEach(n => {               // the desk's left legs were short (hidden by the shelf): full height, under the top
+    const o = root.getObjectByName(n); if (!o || !o.isMesh) return;
+    o.updateWorldMatrix(true, false); const inv = o.matrixWorld.clone().invert(), P = o.geometry.attributes.position, V = new THREE.Vector3();
+    for (let i = 0; i < P.count; i++) { V.fromBufferAttribute(P, i).applyMatrix4(o.matrixWorld); if (V.y > 0.3) V.y += LIFT; V.applyMatrix4(inv); P.setXYZ(i, V.x, V.y, V.z); }
+    P.needsUpdate = true; o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere();
+    moveW(o, 0, 0, -0.13);
+  });
+  { const rolls = root.getObjectByName('PaperRollRack'); if (rolls) rolls.visible = false; }   // shown on the wrapping table (conveyor.js)
+  if (HerbGarden) try {   // herbs.js: edit there, both pages follow
+    let picked = 0;
+    garden = new HerbGarden(root, scene, { colliders: [root], onHarvest: (label, k, it) => toast(`${label} ${it?.count || 1}개 채취 · 모두 ${picked += (it?.count || 1)}개`) });
+    garden.attachHands(renderer, rig);
+    garden.enableMouse(renderer.domElement, camera, 0);   // desktop: left button on a plant/mug; right-drag = look
+    if (MugModule) window.__mug = new MugModule(root, scene, garden, camera);   // mug.js: cocoa, steam, drink at the mouth
+    window.__garden = garden;
+  } catch (e) { garden = null; console.error(e); showErr('herbs: ' + e.message); }
+  try {   // drawers.js moves front + knob + name tag; the flow decides when a drawer opens (click / point / touch), so it gets its own hub
+    if (DrawerSet) { drawerSet = new DrawerSet(root, scene, { extras: [], ray: new THREE.Raycaster() }); window.__drawers = drawerSet; }
+    paperTags(root);
+    // CONVEYOR: the cabinet stands on the back-left of the making desk, its drawers facing the player (+x)
+    const cab = root.getObjectByName('MaterialDrawer');
+    if (cab) { root.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(cab); placeW(cab, -Math.PI / 2, 0.29, 0.47, 0.906 - b.min.y); }
+  } catch (e) { console.error(e); showErr('drawers: ' + e.message); }
+  // these move at run time: keep them out of the static freeze below
+  garden?.plants.forEach(p => { p.mesh.userData.dynamic = true; });
+  root.getObjectByName('MugCup')?.traverse(o => { o.userData.dynamic = true; });
+  try { setupProps(); } catch (e) { console.error(e); showErr('props: ' + e.message); }
+
+  // ---- performance passes
+  // (a) cap texture size. Desktop: 2048. Quest: by the size of the object that uses the texture - every prop has its own
+  // baked 2K image (149 textures = ~120 megapixels), a book or a drawer knob does not need that: <0.3 m -> 128, <0.8 m -> 256, <1.6 m -> 512, else 1024 (walls: 256)
+  const MAPS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap'], texDim = new Map();
+  root.updateMatrixWorld(true);
+  root.traverse(o => { if (!o.isMesh) return;
+    const sz = new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3()), d = Math.max(sz.x, sz.y, sz.z);
+    for (const m of [].concat(o.material)) for (const k of MAPS) { const t = m && m[k]; if (t) texDim.set(t, Math.max(texDim.get(t) || 0, /Wall|Shell|^Cube$|Roof|Ceil/.test(o.name) ? 0.5 : d)); } });   // plaster walls are smooth baked light: 512 is plenty
+  for (const [t, d] of texDim) {
+    const cap = !QUEST ? 2048 : d < 0.3 ? 128 : d < 0.8 ? 256 : d < 1.6 ? 512 : 1024, im = t.image;
+    if (t.isCompressedTexture || !im || !(im.width > cap || im.height > cap)) continue;     // KTX2 textures are already sized + compressed
+    const f = cap / Math.max(im.width, im.height), c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(im.width * f)); c.height = Math.max(1, Math.round(im.height * f)); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+    t.image = c; t.needsUpdate = true;
+  }
+  // (a2) Quest: Standard (PBR) -> Lambert for opaque props: the colour is baked into the texture anyway, so the expensive
+  // specular / IBL maths buys nothing. Kept as they are: glass & other transparent materials, normal-mapped ones, the swaying vines.
+  if (LITE) {
+    const cache = new Map();
+    root.traverse(o => { if (!o.isMesh) return;
+      const conv = m => {
+        if (m && m.isMeshStandardMaterial && m.metalness > 0.3) m.metalness = 0.3;   // no environment map here: full metal renders BLACK (knobs, hooks)
+        if (!m || !m.isMeshStandardMaterial || m.isMeshPhysicalMaterial || m.transparent || m.normalMap || m.userData.keep) return m;
+        if (!cache.has(m)) { const n = new THREE.MeshLambertMaterial({ name: m.name, map: m.map, color: m.color, emissive: m.emissive, emissiveIntensity: m.emissiveIntensity,
+          emissiveMap: m.emissiveMap, aoMap: m.aoMap, aoMapIntensity: m.aoMapIntensity, side: m.side, alphaTest: m.alphaTest, alphaMap: m.alphaMap, vertexColors: m.vertexColors });
+          cache.set(m, n); } return cache.get(m); };
+      o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material); });
+  }
+  // (a3) log-cabin walls: the baked wall textures are plain plaster, so paint horizontal logs over the vertical wall faces in
+  // world space (planks stay level across every wall and the door cut). The baked texture's brightness is kept as the lighting.
+  const LOG_GLSL = `
+    vec3 wn = normalize(cross(dFdx(vWP), dFdy(vWP)));
+    if (abs(wn.y) < 0.5) {
+      float u = abs(wn.x) > abs(wn.z) ? vWP.z : vWP.x, y = vWP.y;
+      float LH = 0.22, row = floor(y / LH), fy = fract(y / LH), rid = h21(vec2(row, 3.7));
+      float belly = sin(fy * 3.14159), seam = smoothstep(0.0, 0.10, fy) * smoothstep(1.0, 0.90, fy);
+      float g = vn(vec2(u * 2.2 + rid * 40.0, y * 38.0)) * 0.6 + vn(vec2(u * 7.0 + rid * 11.0, y * 90.0)) * 0.4;
+      float jx = fract((u + rid * 2.3) / (1.2 + rid * 0.9)), joint = smoothstep(0.0, 0.012, jx) * smoothstep(1.0, 0.988, jx);
+      vec3 wood = mix(vec3(0.20, 0.095, 0.04), vec3(0.42, 0.22, 0.09), 0.35 + 0.65 * g);
+      wood *= 0.78 + 0.4 * rid; wood *= (0.55 + 0.5 * belly) * (0.35 + 0.65 * seam) * (0.6 + 0.4 * joint);
+      float lum = dot(diffuseColor.rgb, vec3(0.3333));
+      diffuseColor.rgb = wood * clamp(lum * 2.2, 0.35, 1.5);
+    }`;
+  const logWall = (m) => {
+    if (!m || m.userData.logged) return; m.userData.logged = true;
+    m.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+        varying vec3 vWP;
+        float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y); }`)
+        .replace('#include <map_fragment>', '#include <map_fragment>\n' + LOG_GLSL);
+    };
+    m.customProgramCacheKey = () => 'logwall'; m.needsUpdate = true;
+  };
+  root.traverse(o => { if (o.isMesh && ['WestWallRound', 'RoomShell', 'Cube'].includes(o.name)) [].concat(o.material).forEach(logWall); });
+
+  // (b) Quest: the tree's baubles/lights are ~300k vertices of tiny spheres. Each ball is its own connected piece, so
+  // find the pieces (union-find over the index buffer) and draw them as ONE InstancedMesh of a 80-triangle sphere.
+  if (LITE) root.traverse(o => {
+    if (!o.isMesh || !o.geometry.index || !/Tree_Ornaments_Bauble|Tree_Lights$/.test(o.name)) return;
+    const g = o.geometry, P = g.attributes.position, I = g.index.array, par = new Int32Array(P.count).map((_, i) => i);
+    const find = a => { while (par[a] !== a) a = par[a] = par[par[a]]; return a; };
+    for (let i = 0; i < I.length; i += 3) { par[find(I[i])] = find(I[i + 1]); par[find(I[i + 1])] = find(I[i + 2]); }
+    const cl = new Map();
+    for (let i = 0; i < P.count; i++) { const r = find(i); let c = cl.get(r); if (!c) cl.set(r, c = { s: new THREE.Vector3(), n: 0, v: [] }); c.s.x += P.getX(i); c.s.y += P.getY(i); c.s.z += P.getZ(i); c.n++; c.v.push(i); }
+    const inst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), o.material, cl.size), M = new THREE.Matrix4(), C = new THREE.Vector3(), V = new THREE.Vector3();
+    let k = 0; for (const c of cl.values()) {
+      C.copy(c.s).multiplyScalar(1 / c.n); let r = 0;
+      for (const i of c.v) r = Math.max(r, V.fromBufferAttribute(P, i).distanceTo(C));
+      inst.setMatrixAt(k++, M.compose(C, new THREE.Quaternion(), new THREE.Vector3(r, r, r)));
+    }
+    inst.position.copy(o.position); inst.quaternion.copy(o.quaternion); inst.scale.copy(o.scale); inst.name = o.name + '_lite';
+    o.parent.add(inst); o.visible = false; o.geometry.dispose();
+  });
+  // (c) static room meshes never move: stop recomputing their matrices every frame (skinned herbs + mug keep theirs)
+  root.updateMatrixWorld(true);
+  root.traverse(o => { if (o.isMesh && !o.isSkinnedMesh && !o.userData.dynamic) { o.matrixAutoUpdate = false; o.updateMatrix(); } });
+
+  const box = new THREE.Box3().setFromObject(root);
+  window.__dbg = { THREE, scene, root, camera, renderer, composer, box, lights, P, colliders, setLook: (y, p = 0) => { yaw = y; pitch = p; },
+    sim: (y, sec, key = 'KeyW') => { yaw = y; keys.add(key); for (let i = 0; i < sec * 60; i++) moveStep(1 / 60); keys.delete(key); return [P.feet.x, P.feet.y, P.feet.z, P.eye].map(v => +v.toFixed(2)); } };
+  buildColliders(root);
+  applyStand();    // stand on the real floor now that it exists
+  document.getElementById('loading').classList.add('done');
+  // the experience: Nicolas comes in through the door and greets you -> recipe book -> make a bath bomb -> wrap -> letter -> send
+  import('./modules/flow.js').then(({ startFlow }) => {
+    flow = startFlow({ colliders, scene, root, camera, renderer, rig, garden, canvas: renderer.domElement, toast, P, cast, drawerSet, layout: SPACE_LAYOUT,
+      door: root.getObjectByName('DoorLeaf'), view: { get: () => [yaw, pitch], set: (y, p) => { yaw = y; pitch = p; }, home: [STAND.yaw, STAND.pitch] },
+      hintEl: document.getElementById('hint'), fire: { setLevel: (k) => fireFx.setLevel?.(k) } });
+    window.__flow = flow;
+  }).catch(e => { console.error(e); showErr('flow: ' + e.message); });
+}
+const onRoomErr = (e) => { showErr('GLB 로드 실패: ' + (e?.message || e) + '\n→ room.glb.js (또는 room.glb) 파일이 index.html 옆에 있어야 해요.');
+  document.getElementById('loading').classList.add('done'); };
+if (window.ROOM_GLB_B64) loader.parse(Uint8Array.from(atob(window.ROOM_GLB_B64), c => c.charCodeAt(0)).buffer, '', onRoom, onRoomErr);
+else loader.load('../room.glb', onRoom, (ev) => { if (ev.total) bar.style.width = (100 * ev.loaded / ev.total) + '%'; }, onRoomErr);
+
+// ---------------------------------------------------------------- ui
+const expEl = document.getElementById('exp'), expV = document.getElementById('expv');
+expEl.oninput = () => { renderer.toneMappingExposure = +expEl.value; expV.textContent = (+expEl.value).toFixed(2); };
+const blmEl = document.getElementById('blm'), blmV = document.getElementById('blmv');
+blmEl.oninput = () => { bloom.strength = +blmEl.value; blmV.textContent = (+blmEl.value).toFixed(2); };
+const litEl = document.getElementById('lit'), litV = document.getElementById('litv');
+litEl.oninput = () => {
+  const mult = +litEl.value;
+  LIGHT_SCALE = BASE_LIGHT_SCALE * mult;
+  litV.textContent = mult.toFixed(2);
+  keptLights.forEach(l => l.intensity = l.userData.baseIntensity * LIGHT_SCALE);
+  rectLights.forEach(l => l.intensity = l.userData.baseIntensity * mult);
+};
+const modeBtn = document.getElementById('mode');
+modeBtn.onclick = () => {
+  walkMode = !walkMode;
+  modeBtn.textContent = walkMode ? '1인칭 걷기' : '자유 비행';
+  modeBtn.setAttribute('aria-pressed', String(walkMode));
+  if (walkMode) { const fy = colliders.length ? floorAt(camera.position.x, camera.position.y - P.eye, camera.position.z) : null;
+    if (fy !== null) P.feet.set(camera.position.x, fy, camera.position.z); }
+  placeCamera();
+};
+const shBtn = document.getElementById('shadows');
+shBtn.onclick = () => {
+  const on = renderer.shadowMap.enabled = !renderer.shadowMap.enabled;
+  shBtn.setAttribute('aria-pressed', String(on));
+  shadowCasters.forEach(l => l.castShadow = on);
+  scene.traverse(o => { if (o.isMesh) o.material && (Array.isArray(o.material) ? o.material : [o.material])
+    .forEach(m => m && (m.needsUpdate = true)); });
+};
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+let _last = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now(), dt = Math.min((now - _last) / 1000, 0.1); _last = now;
+  if (renderer.xr.isPresenting) vrStep(dt); else moveStep(dt);
+  garden?.update(dt); turntable?.update(dt); drawerSet?.update(dt);
+  try { flow?.update(dt, now / 1000); } catch (e) { console.error(e); }
+  if (fireFx.light) {
+    const t = now / 1000;
+    fireFx.light.intensity = (1.6 + Math.sin(t*13)*.25 + Math.sin(t*31.7)*.2 + (Math.random()-.5)*.15) * fireLevel.k;
+    fireFx.tick?.(t);
+  }
+  swayT.value = now / 1000; fireFx.snow?.(now / 1000, dt);
+  for (const h of fireFx.halos) h.material.opacity = 0.4 + Math.sin(now / 1000 * 1.5 + h.userData.ph) * 0.08;   // gentle twinkle
+  // EffectComposer does not work in WebXR - draw straight to the headset
+  if (renderer.xr.isPresenting) renderer.render(scene, camera);
+  else composer.render();
+  window.Audio3D?.update(camera);
+});
+</script>
+</body>
+</html>
