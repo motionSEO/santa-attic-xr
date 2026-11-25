@@ -477,6 +477,7 @@ export class Flow {
     this.book.scale.setScalar(0.75);
     G.add(this.book); this.bookHome = { pos: this.book.position.clone(), quat: this.book.quaternion.clone(), scale: this.book.scale.clone() };
     this.panels.push(this.pages);
+    for (const c of this.book.children) c.visible = false;                   // the placeholder only shows if the LUSH book fails to load
     this.loadRecipeBook();
 
     // work tools
@@ -1062,7 +1063,10 @@ export class Flow {
       this.book.add(rb.object);
       rb.on('change', (st) => this.onBookChange(st));
       if (['emotion', 'recipe'].includes(this.s.step)) rb.openInstant();     // loaded late: catch up
-    } catch (e) { console.warn('recipe book module:', e); }
+    } catch (e) {
+      console.warn('recipe book module:', e); this.rbFailed = true;
+      for (const c of this.book.children) c.visible = true;                  // fall back to the placeholder book
+    }
   }
   bookNormal() { return V(0, 1, 0).applyQuaternion(this.book.getWorldQuaternion(new THREE.Quaternion())); }
   // a fingertip (VR) on the emotion page: a short ray from just above the tip down onto the page
@@ -1083,6 +1087,12 @@ export class Flow {
     if (sn.questDone < want && performance.now() - (this.rbQuestAt || 0) > 900) { this.rbQuestAt = performance.now(); rb.completeIngredient(); }
   }
   showEmotionBook() {
+    // the LUSH book is ~14 MB: if it is still downloading, wait for it (up to 2 min) instead of showing the placeholder
+    if (!this.rb && !this.rbFailed && (this.rbWait = (this.rbWait || 0) + 1) < 240) {
+      if (this.rbWait === 1) this.setHint('레시피북을 펼치는 중…', '잠시만 기다려주세요.');
+      this.later(0.5, () => this.showEmotionBook()); return;
+    }
+    if (!this.rb) for (const c of this.book.children) c.visible = true;      // gave up waiting: placeholder book
     this.s.step = 'emotion';
     this.pages.set({ view: 'choose', selected: null });
     this.scene.attach(this.book);
