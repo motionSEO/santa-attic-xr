@@ -504,7 +504,8 @@ export class Flow {
     this.book.position.copy(L.book); this.book.rotation.y = Math.PI / 2;     // reads from the player side (+x)
     this.book.scale.setScalar(0.75);
     G.add(this.book); this.bookHome = { pos: this.book.position.clone(), quat: this.book.quaternion.clone(), scale: this.book.scale.clone() };
-    this.panels.push(this.pages);
+    // the placeholder book (cover + canvas pages) is never shown: only the LUSH recipe book module appears (loadRecipeBook)
+    for (const c of this.book.children) c.visible = false;
     this.loadRecipeBook();
 
     // work tools
@@ -1098,13 +1099,11 @@ export class Flow {
       const rb = await createRecipeBook({ renderer: this.renderer, assetsUrl: 'modules/recipe-book/assets/' });
       this.rb = rb;
       rb.object.scale.setScalar(RB_SCALE);
-      for (const c of [...this.book.children]) c.visible = false;            // the placeholder book
-      this.panels = this.panels.filter(p => p !== this.pages);
       if (this.garden) this.garden.blockers = this.garden.blockers.filter(b => b !== this.pages.mesh);
       this.book.add(rb.object);
       rb.on('change', (st) => this.onBookChange(st));
       if (['emotion', 'recipe'].includes(this.s.step)) rb.openInstant();     // loaded late: catch up
-    } catch (e) { console.warn('recipe book module:', e); this.rbFailed = true; }
+    } catch (e) { console.warn('recipe book module:', e); this.rbFailed = true; this.setHint('레시피북을 불러오지 못했어요', '인터넷 연결을 확인하고 페이지를 새로고침해주세요.', '#ff9a8a'); }
   }
   bookNormal() { return V(0, 1, 0).applyQuaternion(this.book.getWorldQuaternion(new THREE.Quaternion())); }
   // a fingertip (VR) on the emotion page: a short ray from just above the tip down onto the page
@@ -1126,10 +1125,11 @@ export class Flow {
   }
   showEmotionBook() {
     // the LUSH book (GLB models + page images, ~10 MB) can still be downloading on a slow connection: wait for it instead of
-    // showing the placeholder pages (only if the module failed to load does the placeholder book stand in)
-    if (!this.rb && !this.rbFailed && (this.rbWait = (this.rbWait || 0) + 1) < 240) {
-      if (this.rbWait === 1) this.setHint('레시피북을 펼치는 중…', '책을 불러오고 있어요. 잠시만 기다려주세요.');
-      this.later(0.5, () => this.showEmotionBook()); return;
+    // showing anything else (the placeholder book is never shown; if the module fails, the hint says so)
+    if (!this.rb) {
+      if (!this.rbFailed && !this.rbWait) { this.rbWait = true; this.setHint('레시피북을 펼치는 중…', '책을 불러오고 있어요. 잠시만 기다려주세요.'); }
+      if (!this.rbFailed) this.later(0.5, () => this.showEmotionBook());
+      return;
     }
     this.s.step = 'emotion';
     this.pages.set({ view: 'choose', selected: null });
