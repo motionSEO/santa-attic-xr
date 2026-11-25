@@ -301,8 +301,9 @@ window.herbsReady = Promise.all([
     pointerHit(s) {
       const o = new THREE.Vector3(), d = new THREE.Vector3(); this.pointerRay(s, o, d);
       this.ray.set(o, d); this.ray.near = 0; this.ray.far = 4;
-      const plants = this.plants.filter(p => p.mesh.visible), items = this.items.filter(i => !i.held);
-      const grabs = this.grabbables.filter(g => !g.held && g.enabled !== false && g.object.visible);
+      // rayFilter (optional): which things a pointing pinch may pull from afar (e.g. only what fell on the floor)
+      const rf = this.rayFilter, plants = rf ? [] : this.plants.filter(p => p.mesh.visible), items = this.items.filter(i => !i.held && (!rf || rf(i.mesh)));
+      const grabs = this.grabbables.filter(g => !g.held && g.enabled !== false && g.object.visible && (!rf || rf(g.object)));
       const extra = this.rayTargets?.() || [];
       const hits = this.ray.intersectObjects([...plants.map(p => p.mesh), ...items.map(i => i.mesh), ...grabs.map(g => g.object), ...extra], true);
       for (const h of hits) {
