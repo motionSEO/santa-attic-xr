@@ -2,7 +2,7 @@
 //
 // 오프닝(니콜라스가 문을 열고 들어와 손 흔들며 인사) → 01 마음 고르기(레시피북) → 02 레시피 확인 → 03 공통 베이스 →
 // 03~04 자연재료 수집·손질 → 05 빻기 → 06 틀에 붓기·누르기·열기 → 07 장식 → 08 포장 →
-// 09 그림 편지 → 마법 수반 발송 → 다른 산타의 선물 받기
+// 09 손편지(modules/hand-letter.js) → 마법 수반 발송 → 다른 산타의 선물 받기
 //
 // Every object here is a temporary placeholder made from primitives. Each one is created through
 // make('<asset id>', builder) so a real model can replace it later from assets/manifest.json
@@ -10,13 +10,26 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+// chalkboard UI kit (rush-xr-ui): Santa's dialogue board, the ingredient marker (ring + arrow) and the hand-motion guide
+import { DialoguePanel, GuidePanel, Marker } from './rush-xr-ui.js';
+// the LUSH recipe book module (modules/recipe-book, used as it came): opening animation, emotion page, recipe page + quests
+import { createRecipeBook } from './recipe-book/src/RecipeBook.js';
+const RB_SCALE = 0.7;                       // the open spread is ~0.6 m wide; 0.7 keeps it the size of the old book in front of you
+const RB_RECIPE = { santa: 'magicalSanta', tree: 'christmasTree', ginger: 'gingerbread', snowman: 'snowmanDreaming', silent: 'silentNight', drift: 'snowdrift' };
+import { createHandLetter } from './hand-letter.js';
 
 // ------------------------------------------------------------------ data (from the original game)
 // opening: Santa (Nicolas, the village chief) opens the door, walks in, waves and says these lines
 export const OPENING = {
   name: '니콜라스',
-  lines: ['안녕하신가, 당신은 이번에 새로 온 신입이지?', '나는 산타마을의 촌장 니콜라스일세.',
-    '반갑군. 오늘 처음으로 누군가에게 줄 선물을 만든다지?', '내가 하나하나 알려줄 테니, 차근차근 따라오면 된다네.']
+  // the lines exactly as the rush-xr-ui dialogue asset gives them
+  lines: ['Hi, I’m Santa. This year, let’s make Christmas a little special.', 'Pick a feeling you want to send to a stranger.',
+    'Grab the fairy sugar and star dust first, then gather the rest.', 'Wrap it up and drop it in the magic basin with your letter.'],
+  // Nicolas's recorded voice for those lines, and where each line starts / ends in it (seconds; read from the pauses
+  // in the recording). The bubble moves to the next line when the voice gets there, and closes after the last one.
+  voice: 'Sound/Voice/santa_voice1.mp3',
+  cues: [[0, 4.92], [5.40, 7.61], [8.05, 12.21], [12.59, 16.12]],
+  hold: 1.2            // seconds the last line stays up after the voice ends
 };
 export const ING = {
   fairySugar: { name: '요정설탕', real: '베이킹 소다', location: 'shelf', action: 'pour', color: '#f4f1ff', base: true },
@@ -331,19 +344,6 @@ const PH = {
     const seal = mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.003, 16), mat(0xb8322c)); seal.position.y = 0.0055; g.add(seal);
     return g;
   },
-  inkPot(color) {
-    const g = new THREE.Group();
-    const b = mesh(new THREE.CylinderGeometry(0.018, 0.02, 0.03, 16), mat(0x2b2b33, { transparent: true, opacity: 0.8, roughness: 0.15 })); b.position.y = 0.015; g.add(b);
-    const ink = mesh(new THREE.CircleGeometry(0.016, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, toneMapped: false })); ink.position.y = 0.031; g.add(ink);
-    return g;
-  },
-  pen() {
-    const g = new THREE.Group();
-    const b = mesh(new THREE.CylinderGeometry(0.004, 0.005, 0.13, 10), mat(0x2a2a2a)); b.position.y = 0.065; g.add(b);
-    const nib = mesh(new THREE.ConeGeometry(0.004, 0.012, 10).rotateX(Math.PI), mat(0xd4af37, { metalness: 0.8, roughness: 0.3 })); nib.position.y = -0.006; g.add(nib);
-    const feather = mesh(new THREE.CircleGeometry(0.025, 10), mat(0xf0e6d6, { side: THREE.DoubleSide })); feather.scale.set(0.35, 1.4, 1); feather.position.y = 0.12; g.add(feather);
-    return g;
-  },
   basin() {
     const g = new THREE.Group();
     const ped = mesh(new THREE.CylinderGeometry(0.07, 0.11, 0.72, 16), mat(0x7d7468, { roughness: 1 })); ped.position.y = 0.36; g.add(ped);
@@ -354,20 +354,17 @@ const PH = {
     water.position.y = 0.835; water.name = 'BasinWater'; g.add(water);
     g.userData.water = water; return g;
   },
-  // Nicolas's speech bubble (floats above him, faces the player; works in VR). Clicking anywhere on it = next line.
+  // Nicolas's speech bubble: the chalkboard DialoguePanel from rush-xr-ui (types its own text). Floats above him and
+  // faces the player (works in VR). It quacks like a Panel (mesh / w / h / hitUV) so a click, a pointing pinch or a
+  // fingertip anywhere on it = next line.
   talkPanel() {
-    return new Panel({ w: 0.9, h: 0.27, px: 1024, name: 'SantaTalk', draw: (g, P) => {
-      const st = P.state;
-      if (!P.bg) {
-        g.fillStyle = 'rgba(28,18,10,0.92)'; g.strokeStyle = '#d9b46a'; g.lineWidth = 5;
-        P.round(8, 44, P.W - 16, P.H - 52, 30); g.fill(); g.stroke();
-      }
-      g.fillStyle = INK.red; P.round(40, 10, 220, 64, 20); g.fill();
-      P.text(st.name || '', 150, 22, { size: 34, weight: 700, color: '#fff4dc', align: 'center' });
-      P.text(st.text || '', 50, 104, { size: 42, color: '#f6e7c6', maxW: P.W - 100, lineH: 58 });
-      if (st.next) P.text(st.last ? '▼ 레시피북 펼치기' : '▼ 다음', P.W - 40, P.H - 52, { size: 28, color: '#d9b46a', align: 'right' });
-      P.buttons.push({ id: 'next', x: 0, y: 0, w: P.W, h: P.H });
-    } });
+    const board = new DialoguePanel();                  // the asset as it is (its own board, font, typing speed)
+    const S = 1.55;                                      // only placed bigger, so it reads above Santa from the desk
+    board.scale.setScalar(S);
+    board.traverse(o => { if (o.isMesh) { o.material.depthTest = false; o.material.toneMapped = false; o.renderOrder = o.renderOrder < 0 ? 10 : 11; } });
+    const panel = { mesh: board, w: 0.46, h: 0.46 * 661 / 1550, board, hitUV: () => 'next' };
+    board.userData.panel = panel;
+    return panel;
   }
 };
 
@@ -384,6 +381,16 @@ function useSpaceModels(K) {
   PH.fruitHalf = (id) => id === 'lemon' ? onFloor(K.lemonHalf(1), K.LEMON_LEN / 2) : half(id);
 }
 
+// which hand motion the guide board shows. Only four moments get one: pouring a bottle into the mortar (pour),
+// pulling an ingredient drawer open (grab, set in naturalsHint), pounding in the mortar (pound = 'Prep') and pressing
+// the filled mold (press). Every other step hides the board.
+function guideFor(title = '') {
+  if (title.startsWith('03 재료 수집')) return 'pour';
+  if (title.startsWith('05 빻기')) return 'pound';
+  if (title.startsWith('06 눌러')) return 'press';
+  return null;
+}
+
 // ================================================================== the flow
 export class Flow {
   constructor(ctx) {
@@ -395,7 +402,7 @@ export class Flow {
     this.tweens = []; this.timers = []; this.follows = []; this.floaters = []; this.markers = [];
     this.panels = []; this.grabs = []; this.zones = {};
     this.mouseObj = null; this.mouseDepth = 0.42; this.tiltKey = false; this.tiltAmt = 0;
-    this.pressHold = null; this.drawing = false;
+    this.pressHold = null;
     this.s = { step: 'dark', emotion: null, recipe: null, recipeId: null, done: new Set(), pounds: 0, pourT: 0 };
     this.assets = {};
     this.wrapTex = null;
@@ -470,6 +477,8 @@ export class Flow {
     this.book.scale.setScalar(0.75);
     G.add(this.book); this.bookHome = { pos: this.book.position.clone(), quat: this.book.quaternion.clone(), scale: this.book.scale.clone() };
     this.panels.push(this.pages);
+    for (const c of this.book.children) c.visible = false;                   // the placeholder book is never shown (the LUSH book replaces it)
+    this.loadRecipeBook();
 
     // work tools
     this.mortar = this.make('mortar', PH.mortar); this.mortar.position.copy(L.mortar); G.add(this.mortar);
@@ -655,7 +664,7 @@ export class Flow {
       this.onClick(ray);
     });
     addEventListener('pointerup', (e) => {
-      if (e.button === 0) { this.pressHold = null; this.drawing = false; }
+      if (e.button === 0) this.pressHold = null;
     });
     c.addEventListener('wheel', (e) => { if (this.mouseObj) this.mouseDepth = THREE.MathUtils.clamp(this.mouseDepth - e.deltaY * 0.0006, 0.25, 1.0); }, { passive: true });
     this.renderer.xr.addEventListener('sessionstart', () => { if (this.s.step === 'dark') setTimeout(() => this.begin(), 600); });
@@ -665,14 +674,15 @@ export class Flow {
   clickables() {
     const list = [];
     for (const p of this.panels) if (p.mesh.visible && p.mesh.parent) list.push(p.mesh);
+    if (this.rb && this.s.step === 'emotion') list.push(...this.rb.pageMeshes);
     for (const d of this.drawers) list.push(d.obj, d.tag);
     if (this.lid && this.lid.visible) list.push(this.lid);
     if (this.wrapHandle && this.wrapHandle.visible) list.push(this.wrapHandle);
     if (this.recvBox && this.recvBox.visible) list.push(this.recvBox);
-    for (const p of this.inkPots || []) list.push(p);
     return list;
   }
   onClick(ray) {
+    if (this.rb && this.s.step === 'emotion' && this.rb.pickFromRay(ray)) { this.sfx('click'); return true; }
     const hits = ray.intersectObjects(this.clickables(), true); if (!hits.length) return false;
     return this.clickHit(hits[0], 'mouse');
   }
@@ -680,20 +690,21 @@ export class Flow {
   clickHit(h, who = 'mouse') {
     const o = h.object;
     const owner = (x) => { for (let q = x; q; q = q.parent) { if (q.userData.panel) return { panel: q.userData.panel }; if (this.drawers.some(d => d.obj === q || d.tag === q)) return { drawer: this.drawers.find(d => d.obj === q || d.tag === q) };
-      if (q === this.lid) return { lid: true }; if (q === this.wrapHandle) return { wrap: true }; if (q === this.recvBox) return { recv: true }; if (this.inkPots?.includes(q)) return { ink: q }; } return {}; };
+      if (q === this.lid) return { lid: true }; if (q === this.wrapHandle) return { wrap: true }; if (q === this.recvBox) return { recv: true }; } return {}; };
+    if (this.rb && this.rb.pageMeshes.includes(o)) {                         // VR hand ray on the book's emotion page
+      if (h.uv && this.rb.pick(h.uv.x, h.uv.y)) { this.sfx('click'); return true; } return false;
+    }
     const w = owner(o);
     if (w.panel) {
-      if (w.panel === this.letterPaper) { if (who !== 'mouse') return false; this.drawing = true; this.drawAt(h.uv); return true; }
       const id = w.panel.hitUV(h.uv); if (id) this.press(w.panel, id); return !!id;
     } else if (w.drawer) this.toggleDrawer(w.drawer);
     else if (w.lid) this.lidClick();
     else if (w.wrap) this.coverWrap();
     else if (w.recv) this.openReceived();
-    else if (w.ink) this.pickInk(w.ink.userData.color);
     else return false;
     return true;
   }
-  // XR: fingertips press panel buttons, touch drawers/lid/handles, draw on the letter
+  // XR: fingertips press panel buttons, touch drawers/lid/handles (the hand letter reads the hands itself)
   fingertips() {
     const out = [];
     for (const s of this.garden?.hands || []) {
@@ -705,6 +716,7 @@ export class Flow {
   }
   updateTouch(dt) {
     for (const f of this.fingertips()) {
+      if (this.rb && this.s.step === 'emotion') this.touchBook(f.p);
       const st = (f.slot._touch ||= {});
       for (const pnl of this.panels) {
         if (!pnl.mesh.visible || !pnl.mesh.parent) continue;
@@ -713,9 +725,8 @@ export class Flow {
         const key = pnl.mesh.uuid;
         if (inside && Math.abs(lp.z) < 0.014) {
           const uv = new THREE.Vector2(lp.x / pnl.w + 0.5, lp.y / pnl.h + 0.5);
-          if (pnl === this.letterPaper) { this.drawAt(uv, f.slot); continue; }
           if (!st[key]) { st[key] = true; const id = pnl.hitUV(uv); if (id) this.press(pnl, id); }
-        } else if (!inside || lp.z > 0.03 || lp.z < -0.03) { st[key] = false; if (pnl === this.letterPaper) this.strokeEnd(f.slot); }
+        } else if (!inside || lp.z > 0.03 || lp.z < -0.03) { st[key] = false; }
       }
       // drawers: touch the front
       for (const d of this.drawers) {
@@ -727,8 +738,6 @@ export class Flow {
       if (this.recvBox?.visible && this.s.step === 'receive' && f.p.distanceTo(wp(this.recvBox, V(0, 0.05, 0))) < 0.12) this.openReceived();
       // wrap handle: pinch it and lay it over the bath bomb (or just touch it)
       if (this.wrapHandle?.visible && this.s.step === 'wrapCover' && f.p.distanceTo(wp(this.wrapHandle)) < 0.05) this.coverWrap();
-      // ink pots
-      for (const p of this.inkPots || []) if (f.p.distanceTo(wp(p, V(0, 0.03, 0))) < 0.03) this.pickInk(p.userData.color);
     }
     // pressing the mold lid: a hand (palm) resting on it
     if (this.s.step === 'press' && this.lid) {
@@ -778,13 +787,29 @@ export class Flow {
   unfollow(obj) { this.follows = this.follows.filter(f => f.obj !== obj); }
   float(obj, base) { this.unfloat(obj); this.floaters.push({ obj, base: base.clone(), ph: Math.random() * 6 }); }
   unfloat(obj) { this.floaters = this.floaters.filter(f => f.obj !== obj); }
+  // where to go next: the chalk Marker from rush-xr-ui. On the desk / shelf it is a ring around the thing with an arrow
+  // bobbing above it ('down'); around something floating in the air the ring stands up and faces the player ('forward').
+  // { obj, off } puts the ring at an offset from the object (a drawer's name tag, a plant's leaves).
+  // Each marker is sized to its object so it never sits on it: the ring goes around the object's footprint (or, for
+  // a floating thing / drawer tag, stands up around it), and the arrow floats clear above its top.
   setMarkers(targets) {
     for (const m of this.markers) m.obj.removeFromParent();
     this.markers = targets.filter(Boolean).map(t => {
-      const g = new THREE.Group();
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.04, 12).rotateX(Math.PI), new THREE.MeshBasicMaterial({ color: 0xffd34d, transparent: true, toneMapped: false }));
-      g.add(cone); this.scene.add(g);
-      return { obj: g, target: t.obj || t, off: t.off || V(0, 0.12, 0) };
+      const target = t.obj || t, floating = t.mode ? t.mode === 'forward' : this.floaters.some(f => f.obj === target);
+      target.updateWorldMatrix(true, true);
+      const box = new THREE.Box3().setFromObject(target), size = box.getSize(V()), center = box.getCenter(V());
+      if (box.isEmpty()) { size.set(0.06, 0.06, 0.06); center.copy(wp(target)); }
+      const foot = Math.max(size.x, size.z) / 2;
+      // ring radius ~ the kit's drawn circle (0.36 of a plane 2.8 x radius wide) clears the object by a few cm
+      const radius = THREE.MathUtils.clamp((floating ? Math.max(foot, size.y / 2) : foot) * 1.15 + 0.03, 0.05, 0.35);
+      const height = floating ? 0 : size.y + 0.02;                          // 'down': arrow tip just above the top (it bobs up 5 cm)
+      const g = new Marker({ mode: floating ? 'forward' : 'down', radius, height, gap: 0.03 });
+      g.arrow.scale.setScalar(0.32);                                         // an ~11 cm arrow instead of the demo's 34 cm
+      g.traverse(o => { if (o.isMesh) { o.material.toneMapped = false; o.renderOrder = 5; } });
+      this.scene.add(g);
+      // anchor: footprint centre on the bottom (down) or the middle (forward), kept relative to the object as it moves
+      const anchor = floating ? center : V(center.x, box.isEmpty() ? center.y : box.min.y + 0.012, center.z);   // +1 cm: rounded models dip into the desk
+      return { obj: g, target, rel: anchor.sub(wp(target)), floating };
     });
   }
 
@@ -830,10 +855,37 @@ export class Flow {
   // ---------------------------------------------------------------- hints
   setHint(title, body, accent) {
     this.hint.set({ title, body, accent });
+    this.setGuide(guideFor(title));
     if (this.hintEl) {
       this.hintEl.style.display = title || body ? 'block' : 'none';
       this.hintEl.innerHTML = `<b style="color:${accent || '#ffd9a8'}">${title}</b>${body ? '<br>' + body : ''}`;
     }
+  }
+
+  // hand-motion guide (rush-xr-ui GuidePanel): a chalkboard with two hands looping the motion for the current step.
+  // It hangs low on the right of the view (VR and PC) and hides when the step needs no special motion.
+  setGuide(name) {
+    if (!this.guide) {
+      const g = this.guide = new GuidePanel();
+      for (const l of g.children.filter(o => o.isLight)) g.remove(l);        // the kit lights its demo; our room has its own lights
+      g.traverse(o => { if (o.isMesh || o.isLineSegments) o.renderOrder = 12; });
+      g.visible = false; this.scene.add(g);
+    }
+    const g = this.guide;
+    if (!name) { g.visible = false; this.guideName = null; return; }
+    if (name !== this.guideName) { this.guideName = name; g.play(name); g.userData.placed = false; }
+    g.visible = true;
+  }
+  updateGuide(dt, vq) {
+    const g = this.guide; if (!g?.visible) return;
+    g.update(dt);
+    const xr = this.renderer.xr.isPresenting;
+    // close to the eyes so the desk props (mug, jars) never cut into it
+    g.scale.setScalar(xr ? 0.65 : 0.55);
+    const target = xr ? this.viewFront(0.5, -0.14, 0.26) : this.viewFront(0.42, -0.1, 0.25);
+    if (!g.userData.placed || g.position.distanceTo(target) > 0.35) { g.userData.placed = true; g.position.copy(target); g.quaternion.copy(vq); }
+    g.position.lerp(target, 1 - Math.exp(-dt * 4));
+    g.quaternion.slerp(vq, 1 - Math.exp(-dt * 6));
   }
 
   // ================================================================ 00 opening: Nicolas opens the door, walks in, waves and talks
@@ -895,8 +947,8 @@ export class Flow {
     this.later(1.0, () => { this.tween(1.6, k => this.fire?.setLevel(0.12 + 0.88 * ease.out(k))); this.fx.emit(L.chimney, { color: '#ffb35a', count: 50, speed: 0.6, gravity: -0.4, life: 1.0 }); });
     const P = this.santaPath;
     if (!this.santa || !P) { this.later(1.0, () => this.showEmotionBook()); return; }      // no santa.js: straight to the book
-    this.camLook = P.doorLook;                                                // PC: the view turns to the door
-    this.later(1.4, () => { this.knock(); this.setHint('똑똑, 누가 왔나 봐요', this.renderer.xr.isPresenting ? '오른쪽 앞의 문을 봐주세요.' : ''); });
+    // no automatic camera here: the player turns to the door (and to Nicolas) themselves, on PC and in VR
+    this.later(1.4, () => { this.knock(); this.setHint('똑똑, 누가 왔나 봐요', this.renderer.xr.isPresenting ? '오른쪽 앞의 문을 봐주세요.' : '오른쪽 앞의 문을 봐주세요. (오른쪽 버튼을 누른 채 끌어서 둘러보기)'); });
     this.later(2.6, () => this.openDoor());
   }
   openDoor() {
@@ -920,32 +972,38 @@ export class Flow {
   startTalk() {
     const S = this.santa;
     const panel = PH.talkPanel();
-    panel.mesh.renderOrder = 10; panel.mesh.material.depthTest = false; this.scene.add(panel.mesh); this.panels.push(panel);
-    this.talk = { panel, i: 0, typed: 0, done: false, shown: -1 };
+    this.scene.add(panel.mesh); this.panels.push(panel);
+    this.talk = { panel, i: 0, said: -1, t0: performance.now() / 1000 };
+    // the voice: its clock drives the lines (falls back to a plain clock with the same cues if it can't play)
+    const file = this.manifest?.sounds?.voice || OPENING.voice;
+    if (file && OPENING.cues?.length) {
+      try { const a = this.talk.voice = new Audio(file); a.volume = 1; a.play().catch(() => { this.talk && (this.talk.voice = null); }); }
+      catch (e) { this.talk.voice = null; }
+    }
     S.setExpression('happy'); S.wave(true);
     this.setHint('니콜라스의 인사', this.renderer.xr.isPresenting ? '트리거를 당기거나 엄지와 검지로 집으면 다음 대사로 넘어가요.' : '클릭하거나 Space를 누르면 다음 대사로 넘어가요.');
   }
   advanceTalk() {
     const T = this.talk; if (!T || this.s.step !== 'intro') return;
     const now = performance.now(); if (now - (this.talkAt || 0) < 250) return; this.talkAt = now;   // one pinch can arrive as a click and a select
-    const line = OPENING.lines[T.i] || '';
-    if (!T.done) { T.typed = line.length; return; }                         // first press: finish typing the line
+    const B = T.panel.board;
+    if (!B.done) { B.skip(); return; }                                       // first press: finish typing the line
     this.sfx('click');
-    T.i++; T.typed = 0; T.done = false; T.shown = -1;
+    T.i++;
+    const cue = OPENING.cues?.[T.i];                                          // skipping ahead: the voice jumps to that line too
+    if (cue) { if (T.voice) T.voice.currentTime = cue[0]; else T.t0 = performance.now() / 1000 - cue[0]; }
+    else if (T.voice) T.voice.pause();
     if (T.i === 1) this.santa.wave(false);                                    // waves on the greeting only
     if (T.i >= OPENING.lines.length) this.endTalk();
   }
   endTalk() {
-    const T = this.talk; this.talk = null;
+    const T = this.talk; if (!T) return; this.talk = null;
+    T.voice?.pause();
     this.panels = this.panels.filter(p => p !== T.panel);
     const m = T.panel.mesh, s0 = m.scale.clone();
     this.tween(0.35, k => m.scale.set(s0.x, s0.y * Math.max(0.05, 1 - k), s0.z), () => m.removeFromParent());
     this.santa.talk(false); this.santa.wave(false); this.santa.setExpression('happy');
-    this.camLook = null;
-    if (this.view && !this.renderer.xr.isPresenting) {                       // PC: back to the work desk view
-      const [y0, p0] = this.view.get(), [y1, p1] = this.view.home, dy = Math.atan2(Math.sin(y1 - y0), Math.cos(y1 - y0));
-      this.tween(1.0, k => { const e = ease.inOut(k); this.view.set(y0 + dy * e, p0 + (p1 - p0) * e); });
-    }
+    this.camLook = null;                                                     // the view stays where the player left it
     this.later(0.6, () => this.showEmotionBook());
     // then he steps aside (toward the door) so the fireplace and the desk stay clear, and keeps watching you work
     this.later(1.4, () => { this.santaWalking = true;
@@ -964,17 +1022,27 @@ export class Flow {
     }
     if (!S.object.visible) return;
     if (T) {
-      const line = OPENING.lines[T.i] || '';
-      if (!T.done) {
-        T.typed = Math.min(line.length, T.typed + dt * 20);                  // santa.js makes the talking blips itself
-        if (T.typed >= line.length) T.done = true;
+      const B = T.panel.board;
+      const cues = OPENING.cues;
+      if (cues?.length) {                                                    // voiced: the recording sets the pace
+        const now = performance.now() / 1000;
+        if (T.voice?.ended) T.endT ??= now;                                  // after the recording ends its clock stops: keep counting
+        const vt = !T.voice ? now - T.t0 : T.voice.ended ? T.voice.duration + now - T.endT : T.voice.currentTime;
+        while (T.i < cues.length - 1 && vt >= cues[T.i + 1][0]) { T.i++; if (T.i === 1) S.wave(false); }
+        const cue = cues[T.i];
+        S.talk(!!cue && vt >= cue[0] && vt < cue[1], { voice: !!T.voice });  // mouth moves while he speaks (no blips over the voice)
+        if (T.i === cues.length - 1 && vt >= cue[1] + (OPENING.hold ?? 1) && !T.closing) { T.closing = true; this.later(0, () => this.endTalk()); }
       }
-      const shown = Math.floor(T.typed) + (T.done ? 1000 : 0);
-      if (shown !== T.shown) { T.shown = shown; T.panel.set({ name: OPENING.name, text: line.slice(0, Math.floor(T.typed)), next: T.done, last: T.i === OPENING.lines.length - 1 }); }
-      S.talk(!T.done);
+      if (T.said !== T.i) { T.said = T.i; B.say(OPENING.lines[T.i] || ''); }
+      B.update(dt);
+      if (!cues?.length) S.talk(!B.done);                                    // no voice: santa.js makes the talking blips itself
       const m = T.panel.mesh, p = S.object.position;
-      const toHead = V(head.x - p.x, 0, head.z - p.z).normalize();
-      m.position.set(p.x, p.y + 1.82, p.z).addScaledVector(toHead, 0.25);
+      // beside his face, on the player's right: the board's near edge just clears his head (head radius ~0.25 m)
+      const face = S.parts?.head ? wp(S.parts.head) : V(p.x, p.y + 1.6, p.z);
+      const toHead = V(head.x - face.x, 0, head.z - face.z).normalize();
+      const right = V(toHead.z, 0, -toHead.x);                               // the player's right, seen from the player
+      const half = T.panel.w * m.scale.x / 2;
+      m.position.copy(face).addScaledVector(right, 0.28 + half).addScaledVector(toHead, 0.15);
       m.lookAt(head);
     }
     // head follows the player once he is inside (during the walk he looks where he goes)
@@ -982,12 +1050,65 @@ export class Flow {
   }
 
   // ================================================================ 01–02 recipe book
+  // The LUSH recipe book replaces the placeholder (cover + canvas pages) inside this.book, so the book still lies on the
+  // desk, rises in front of you when Nicolas is done and goes back to the desk when gathering starts, exactly as before.
+  async loadRecipeBook() {
+    try {
+      // The module reads its page images back from a canvas. When a host serves those files from another origin
+      // (raw.githack.com redirects big files to raw.githubusercontent.com) the canvas would be tainted and the book
+      // fails to build. So its images are requested with CORS (both hosts allow it); the module itself is untouched.
+      if (!HTMLImageElement.prototype.__rbCors) {
+        const d = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+        Object.defineProperty(HTMLImageElement.prototype, 'src', { configurable: true, get() { return d.get.call(this); },
+          set(v) { if (typeof v === 'string' && v.includes('recipe-book/assets/') && !this.crossOrigin) this.crossOrigin = 'anonymous'; d.set.call(this, v); } });
+        HTMLImageElement.prototype.__rbCors = true;
+      }
+      const rb = await createRecipeBook({ renderer: this.renderer, assetsUrl: 'modules/recipe-book/assets/' });
+      this.rb = rb;
+      rb.object.scale.setScalar(RB_SCALE);
+      for (const c of [...this.book.children]) c.visible = false;            // the placeholder book
+      this.panels = this.panels.filter(p => p !== this.pages);
+      if (this.garden) this.garden.blockers = this.garden.blockers.filter(b => b !== this.pages.mesh);
+      this.book.add(rb.object);
+      rb.on('change', (st) => this.onBookChange(st));
+      if (['emotion', 'recipe'].includes(this.s.step)) rb.openInstant();     // loaded late: catch up
+    } catch (e) {                                                            // never the placeholder book: try again
+      console.warn('recipe book module:', e);
+      this.rbTries = (this.rbTries || 0) + 1;
+      if (this.rbTries < 5) setTimeout(() => this.loadRecipeBook(), 2000);
+      else this.setHint('레시피북을 불러오지 못했어요', '페이지를 새로고침해주세요.');
+    }
+  }
+  bookNormal() { return V(0, 1, 0).applyQuaternion(this.book.getWorldQuaternion(new THREE.Quaternion())); }
+  // a fingertip (VR) on the emotion page: a short ray from just above the tip down onto the page
+  touchBook(p) {
+    const n = this.bookNormal(), ray = new THREE.Raycaster(p.clone().addScaledVector(n, 0.012), n.negate(), 0, 0.024);
+    if (this.rb.pickFromRay(ray)) this.sfx('click');
+  }
+  onBookChange(st) {
+    // an emotion was picked, marked and the page flipped to its recipe: that is the old "choose" + "recipe" step
+    if (this.s.step === 'emotion' && st.state === 'open' && st.page === 'recipe' && RB_RECIPE[st.recipe]) {
+      const e = EMOTIONS.find(x => x.recipe === RB_RECIPE[st.recipe]); if (e) this.chooseEmotion(e.id);
+    }
+  }
+  syncBookQuests() {         // strike the book's ingredients as they go into the mortar (the book strikes them in its own order)
+    const rb = this.rb, r = this.s.recipe; if (!rb || !r || ['emotion', 'recipe'].includes(this.s.step)) return;
+    const sn = rb.snapshot; if (sn.state !== 'open' || sn.page !== 'recipe') return;
+    const want = Math.min(sn.questTotal ?? 5, this.needed().filter(id => this.s.done.has(id)).length);
+    if (sn.questDone < want && performance.now() - (this.rbQuestAt || 0) > 900) { this.rbQuestAt = performance.now(); rb.completeIngredient(); }
+  }
   showEmotionBook() {
+    // the LUSH book is ~14 MB: if it is still downloading, wait for it (up to 2 min) instead of showing the placeholder
+    if (!this.rb) {                                                          // only ever the LUSH book: wait for it
+      if (!this.rbWait) { this.rbWait = true; this.setHint('레시피북을 펼치는 중…', '잠시만 기다려주세요.'); }
+      this.later(0.5, () => this.showEmotionBook()); return;
+    }
     this.s.step = 'emotion';
     this.pages.set({ view: 'choose', selected: null });
     this.scene.attach(this.book);
     const s0 = this.book.scale.x; this.tween(1.0, k => this.book.scale.setScalar(s0 + (1.0 - s0) * k));
     this.follow(this.book, { dist: 0.55, yOff: -0.03, speed: 6, tiltBook: true });
+    this.rb?.open();                                                          // the book's own opening animation
     this.fx.emit(wp(this.book), { color: '#ffe28a', count: 40, speed: 0.5, life: 1 });
     this.setHint('01 마음 고르기', '테이블의 레시피북이 떠올랐어요. 첫 장에서 전하고 싶은 마음을 손가락으로 눌러 골라주세요. (PC: 클릭)');
   }
@@ -999,7 +1120,6 @@ export class Flow {
       if (id === 'back' && this.s.step === 'recipe') { this.s.step = 'emotion'; this.pages.set({ view: 'choose', selected: null }); this.setHint('01 마음 고르기', '전하고 싶은 마음을 다시 골라주세요.'); }
     }
     if (panel === this.talk?.panel && id === 'next') return this.advanceTalk();
-    if (panel && panel === this.letterBtns) { if (id === 'clear') this.clearLetter(); if (id === 'done') this.finishLetter(); }
     if (panel && panel === this.endPanel && id === 'restart') location.reload();
   }
   chooseEmotion(id) {
@@ -1007,6 +1127,11 @@ export class Flow {
     this.s.emotion = e; this.s.recipeId = e.recipe; this.s.recipe = RECIPES[e.recipe]; this.s.step = 'recipe';
     this.pages.set({ selected: id });
     this.fx.emit(wp(this.book), { color: e.color, count: 30, speed: 0.35, life: 0.8 });
+    if (this.rb) {                                                           // the book shows the recipe itself; then it goes back to the desk
+      this.setHint('02 레시피 확인', `'${e.label}'${josa(e.label, '을', '를')} 담은 배쓰밤 레시피예요. 재료를 확인해주세요. 잠시 뒤 책이 작업대로 내려가고 재료 모으기가 시작돼요.`);
+      this.later(4.5, () => { if (this.s.step === 'recipe') this.beginGather(); });
+      return;
+    }
     this.later(0.6, () => { this.pages.set({ view: 'recipe' }); this.setHint('02 레시피 확인', `'${e.label}'${josa(e.label, '을', '를')} 담은 배쓰밤 레시피예요. 재료를 확인하고 오른쪽 페이지의 '제작 시작'을 눌러주세요.`); });
   }
   beginGather() {
@@ -1122,6 +1247,8 @@ export class Flow {
     const lines = left.map(id => `${ING[id].name}(${LOC[ING[id].location]})`).join(', ');
     this.setHint('03~04 자연재료 수집 · 손질', `레시피북을 보며 ${lines}${josa(lines, '을', '를')} 모아 손질한 뒤 절구에 넣어주세요.${left.some(id => ING[id].location === 'drawer') ? ' 서랍은 멀리 있으니 손으로 가리킨 뒤 집으면 열려요 (PC: 클릭).' : ''}`);
     this.setMarkers(left.map(id => this.locationTarget(id)));
+    // motion guide: a drawer ingredient still to fetch -> pull the drawer (grab), else a bottle one -> pour
+    this.setGuide(left.some(id => ING[id].location === 'drawer') ? 'grab' : left.some(id => ING[id].location === 'shelf') ? 'pour' : null);
     this.pages.redraw();
   }
   locationTarget(id) {
@@ -1129,7 +1256,7 @@ export class Flow {
     if (loc === 'shelf') return this.bottles[id];
     if (loc === 'basket') return this.fruits[id] || this.basket;
     if (loc === 'pot') { const p = this.garden?.plants.find(p => p.herb === id); return p ? { obj: p.mesh, off: V(0, 0.08, 0) } : null; }
-    if (loc === 'drawer') { const d = this.drawers.find(d => d.id === id); return d ? { obj: d.tag, off: V(0, 0.07, 0) } : null; }
+    if (loc === 'drawer') { const d = this.drawers.find(d => d.id === id); return d ? { obj: d.tag, mode: 'forward' } : null; }
   }
 
   onHerbDrop(it) {      // a picked leaf/petal let go: into the mortar?
@@ -1360,7 +1487,7 @@ export class Flow {
     this.tweenTo(this.bomb, wp(this.wrap, V(0, 0.003, 0)), new THREE.Quaternion(), 0.3);
     this.wrapHandle.visible = true;
     this.setHint('08 포장 · 감싸기', '포장지 앞쪽 끝(노란 손잡이)을 잡고 배쓰밤 위로 덮어주세요. 리본은 자동으로 묶여요. (PC: 노란 손잡이 클릭)');
-    this.setMarkers([{ obj: this.wrapHandle, off: V(0, 0.07, 0) }]);
+    this.setMarkers([this.wrapHandle]);
   }
   coverWrap() {
     if (this.s.step !== 'wrapCover') return;
@@ -1376,54 +1503,36 @@ export class Flow {
     this.later(1.6, () => this.toLetter());
   }
 
-  // ================================================================ 09 picture letter
+  // ================================================================ 09 hand letter (modules/hand-letter.js)
+  // A big letter paper stands in front of the player (on a thin stand down to the floor). Pick up the pencil next to it
+  // and write with the pencil tip (Quest hands: pinch / fist, controllers: trigger / grip, PC: hold the left button and drag).
+  // [지우기] 1 s / [보내기] 0.7 s held down. Sending folds the letter and it flies away, then it becomes the envelope.
   toLetter() {
     this.s.step = 'letter';
-    this.strokes = []; this.inkColor = '#c0392b';
     const gp = wp(this.gift).add(V(0.06, 0, 0.3)); this.tweenTo(this.gift, gp, null, 0.8, () => this.restBelow(this.gift));
-    this.letterPaper = new Panel({ w: 0.26, h: 0.19, px: 760, transparent: false, name: 'LetterPaper', draw: (g, P) => {
-      if (!P.bg) { g.fillStyle = '#fbf5e8'; g.fillRect(0, 0, P.W, P.H); }
-      g.strokeStyle = '#eadfc8'; g.lineWidth = 2; for (let y = 60; y < P.H; y += 50) { g.beginPath(); g.moveTo(30, y); g.lineTo(P.W - 30, y); g.stroke(); }
-      for (const s of this.strokes) { g.strokeStyle = s.color; g.lineWidth = 7; g.lineCap = g.lineJoin = 'round'; g.beginPath(); s.pts.forEach(([x, y], i) => i ? g.lineTo(x * P.W, y * P.H) : g.moveTo(x * P.W, y * P.H)); g.stroke(); }
-      if (!this.strokes.length) P.text('여기에 그림으로 마음을 그려주세요', P.W / 2, P.H / 2 - 18, { size: 30, color: '#b9aa9b', align: 'center' });
-    } });
-    const m = this.letterPaper.mesh; m.rotation.set(-Math.PI / 2, 0, Math.PI / 2); m.position.copy(L.letter).add(V(0, 0.002, 0)); this.group.add(m);
-    this.panels.push(this.letterPaper); this.garden?.blockers.push(m);
-    this.letterBtns = new Panel({ w: 0.26, h: 0.06, px: 780, name: 'LetterButtons', draw: (g, P) => {
-      P.button('clear', 10, 10, 360, P.H - 20, '다시 그리기', { color: '#8a6f5e', size: 40 });
-      P.button('done', P.W - 370, 10, 360, P.H - 20, '편지 완성', { color: INK.green, size: 40, disabled: !this.strokes.length });
-    } });
-    const b = this.letterBtns.mesh; b.position.copy(L.letter).add(V(0.15, 0.05, 0)); b.rotation.set(0, Math.PI / 2, 0); b.rotateX(-0.5); this.group.add(b);
-    this.panels.push(this.letterBtns); this.garden?.blockers.push(b);
-    this.inkPots = ['#c0392b', '#2e7d32', '#1565c0', '#f9a825', '#6a1b9a'].map((c, i) => {
-      const p = this.make('inkPot', () => PH.inkPot(c)); p.userData.color = c;
-      p.position.set(L.letter.x + 0.135, DESK_Y, L.letter.z + 0.17 + i * 0.05); this.group.add(p); return p;
-    });
-    this.pen = this.make('pen', PH.pen); this.pen.position.set(L.letter.x + 0.13, DESK_Y + 0.006, L.letter.z - 0.22); this.pen.rotation.z = Math.PI / 2; this.group.add(this.pen);
-    this.grab(this.pen, { modes: ['pinch', 'fist'], reach: 0.04, tip: V(0, -0.012, 0) });
-    this.setHint('09 그림 편지', '종이에 손가락(또는 펜)으로 그림을 그려 마음을 표현해보세요. 잉크병을 만지면 색이 바뀌어요. 다 그리면 \'편지 완성\'. (PC: 종이 위에서 왼쪽 버튼을 누른 채 마우스로 그리기)');
-    this.setMarkers([{ obj: m, off: V(0, 0, 0.06) }]);
+    if (!this.handLetter) {
+      const hl = this.handLetter = createHandLetter({
+        renderer: this.renderer, scene: this.scene, camera: this.camera, parent: this.rig || this.scene,
+        lang: 'ko', texts: { dear: '이름 모를 산타에게' }, storageKey: 'santa-attic-hand-letter-pose',
+        addLight: false,                                   // the attic has its own lights (a hemisphere light would light the whole room)
+        floorY: () => this.P?.feet?.y ?? 0,
+      });
+      // the room renders with AgX tone mapping: keep the paper, buttons and handles at the colours of the design
+      for (const o of [hl.letter.group, hl.letter.stand, hl.letter.shadow]) o.traverse((m) => { if (m.isMesh && m.material.isMeshBasicMaterial) m.material.toneMapped = false; });
+      hl.onBeforeSend = (png) => { this.letterImage = png; };
+      hl.onSend = () => this.sfx('letter');
+      hl.onDone = () => this.finishLetter();
+    }
+    this.letterImage = null;
+    this.handLetter.show();
+    this.setHint('09 손편지', '편지지 옆의 연필을 집어(꼬집거나 쥐어서) 이름 모를 산타에게 편지를 써보세요. 다 쓰면 [보내기]를 잠시 누르고 있어요. 오른쪽 [각도], 아래 [이동] 손잡이로 편지지를 맞출 수 있어요. (PC: 종이 위에서 왼쪽 버튼을 누른 채 끌어서 쓰기)');
+    this.setMarkers([]);
   }
-  pickInk(c) { if (this.inkColor !== c) { this.inkColor = c; this.toast('잉크 색이 바뀌었어요'); } }
-  drawAt(uv, who = 'mouse') {
-    if (this.s.step !== 'letter' || !uv) return;
-    const x = uv.x, y = 1 - uv.y;
-    let s = this.curStroke?.who === who ? this.curStroke : null;
-    if (!s) { s = this.curStroke = { who, color: this.inkColor, pts: [] }; this.strokes.push(s); }
-    const last = s.pts[s.pts.length - 1];
-    if (!last || Math.hypot(last[0] - x, last[1] - y) > 0.004) { s.pts.push([x, y]); this.letterPaper.redraw(); if (this.strokes.length === 1 && s.pts.length === 2) this.letterBtns.redraw(); }
-  }
-  strokeEnd(who) { if (this.curStroke?.who === who) this.curStroke = null; }
-  clearLetter() { this.strokes = []; this.curStroke = null; this.letterPaper.redraw(); this.letterBtns.redraw(); }
   finishLetter() {
-    if (this.s.step !== 'letter' || !this.strokes?.length) return;
+    if (this.s.step !== 'letter') return;
     this.s.step = 'sendPrep';
     this.toast('편지 완성');
-    const m = this.letterPaper.mesh;
-    this.panels = this.panels.filter(p => p !== this.letterPaper && p !== this.letterBtns);
-    const s0 = m.scale.clone(); this.tween(0.6, k => m.scale.set(s0.x, s0.y * Math.max(0.05, 1 - k), s0.z), () => m.removeFromParent());
-    this.letterBtns.mesh.removeFromParent();
-    for (const p of this.inkPots) p.visible = false; this.forceRelease(this.pen); this.ungrab(this.pen); this.pen.visible = false;
+    this.handLetter?.hide();
     this.env = this.make('envelope', PH.envelope); this.env.position.copy(this.group.worldToLocal(L.letter.clone().add(V(0, 0.01, 0)))); this.group.add(this.env);
     this.later(0.7, () => this.toSend());
   }
@@ -1437,7 +1546,7 @@ export class Flow {
     this.gift.userData.home = { pos: a, quat: new THREE.Quaternion() }; this.env.userData.home = { pos: b, quat: new THREE.Quaternion() };
     this.basin.userData.placeholder.userData.water.material.emissiveIntensity = 1.6;
     this.setHint('09 마법 수반으로 발송', '떠 있는 선물과 편지를 하나씩 잡아, 왼쪽의 마법 수반 위에서 놓아주세요. 수반 위에서 손을 놓으면 물속으로 쏙 들어가요.');
-    this.setMarkers([this.gift, this.env, { obj: this.basin, off: V(0, 1.05, 0) }]);
+    this.setMarkers([this.gift, this.env, { obj: this.basin, off: V(0, 0.86, 0) }]);
   }
   sink(o) {
     this.forceRelease(o); this.ungrab(o); this.unfloat(o); this.sfx('splash');
@@ -1511,6 +1620,7 @@ export class Flow {
 
   // ---------------------------------------------------------------- grab / release rules
   onGrabbed(o) {
+    if (this.s.step === 'naturals' && ING[o.userData.ing]?.action === 'pour' && this.bottles[o.userData.ing] === o) this.setGuide('pour');   // a bottle in hand: pour it
     if (o === this.fruits.bergamot || o === this.fruits.lemon) { if (this.board.userData.item === o) this.board.userData.item = null; }
     if (o.userData.onBoard) { o.userData.onBoard = false; if (this.board.userData.item === o) this.board.userData.item = null; }
     const d = this.drawers.find(x => x.item === o); if (d) this.unfloat(o);
@@ -1606,9 +1716,11 @@ export class Flow {
     }
     for (const m of this.markers) {
       if (!m.target.parent || m.target.visible === false) { m.obj.visible = false; continue; }
-      m.obj.visible = true; m.obj.position.copy(wp(m.target, m.off)); m.obj.position.y += 0.02 + Math.sin(t * 4) * 0.012;
-      m.obj.children[0].material.opacity = 0.55 + Math.sin(t * 3) * 0.3;
+      if (m.target.userData.holder) { m.obj.visible = false; continue; }    // in a hand: the job is done
+      m.obj.visible = true; m.obj.position.copy(wp(m.target)).add(m.rel); m.obj.update(dt, this.camera);
     }
+    this.updateGuide(dt, vq);
+    if (this.rb) { this.rb.update(dt); this.syncBookQuests(); }
     // VR hint panel follows lazily, a bit above the view
     if (this.renderer.xr.isPresenting && (this.hint.state.title || this.hint.state.body)) {
       const m = this.hint.mesh; m.visible = true;
@@ -1637,18 +1749,11 @@ export class Flow {
         const camYaw = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ').y;
         const right = V(Math.cos(camYaw), 0, -Math.sin(camYaw));
         const q = new THREE.Quaternion().setFromAxisAngle(right, -this.tiltAmt * 2.0).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, camYaw, 0)));
-        if (o === this.knife || o === this.pen) q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 2, -0.4)));
+        if (o === this.knife) q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 2, -0.4)));
         if (o === this.pestle) q.identity();
         o.quaternion.slerp(q, 1 - Math.exp(-dt * 12));
       }
-      if (this.drawing && this.letterPaper) {     // PC drawing: keep tracing where the view points
-        const r = new THREE.Raycaster(); r.setFromCamera(this.garden.mouse.ndc, this.camera);
-        const h = r.intersectObject(this.letterPaper.mesh)[0]; if (h) this.drawAt(h.uv); else this.strokeEnd('mouse');
-      }
-    } else if (this.drawing && this.letterPaper && this.garden?.mouse) {
-      const r = new THREE.Raycaster(); r.setFromCamera(this.garden.mouse.ndc, this.camera);
-      const h = r.intersectObject(this.letterPaper.mesh)[0]; if (h) this.drawAt(h.uv); else this.strokeEnd('mouse');
-    } else if (!this.drawing) this.strokeEnd('mouse');
+    }
 
     // continuous checks: pouring, sprinkling, knife, pestle, two-hand break, mortar into mold
     this.continuous(dt);
@@ -1716,12 +1821,17 @@ export class Flow {
       for (const s of this.garden?.hands || []) if (s.connected && s.pinch && s.point.distanceTo(wp(this.wrapHandle)) < 0.06) { this.wrapGrab = s; }
       if (this.wrapGrab) { if (!this.wrapGrab.pinch) this.wrapGrab = null; else if (this.wrapGrab.point.distanceTo(wp(this.bomb)) < 0.1) this.coverWrap(); }
     }
-    // pen (XR): its tip draws on the letter
-    if (st === 'letter' && this.held(this.pen) && this.pen.userData.holder !== 'mouse') {
-      const tip = wp(this.pen, V(0, -0.012, 0)), lp = this.letterPaper.mesh.worldToLocal(tip.clone());
-      if (Math.abs(lp.z) < 0.012 && Math.abs(lp.x) < 0.13 && Math.abs(lp.y) < 0.095) this.drawAt(new THREE.Vector2(lp.x / 0.26 + 0.5, lp.y / 0.19 + 0.5), 'pen');
-      else this.strokeEnd('pen');
-      for (const p of this.inkPots) if (tip.distanceTo(wp(p, V(0, 0.03, 0))) < 0.03) this.pickInk(p.userData.color);
+    // hand letter (09): its own pencil, hands / controllers / mouse
+    if (this.handLetter) {
+      // PC: the view looks down at the workbench, so the paper would sink into the desk. Draw it over the room like UI.
+      // VR: normal depth, so your own hands stay in front of the paper.
+      const overlay = !this.renderer.xr.isPresenting, L2 = this.handLetter.letter;
+      if (L2.overlay !== overlay) {
+        L2.overlay = overlay;
+        for (const o of [L2.paper, L2.pencil]) o.traverse((m) => { if (m.isMesh && m !== L2.cursor) { m.material.depthTest = !overlay; m.material.needsUpdate = true; } });
+        for (const h of L2.handles) h.mesh.material.depthTest = !overlay;
+      }
+      this.handLetter.update(dt);
     }
   }
 }
