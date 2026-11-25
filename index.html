@@ -61,7 +61,7 @@
     background:rgba(255,215,170,.35); }
   @media (pointer:coarse) { #pad { display:block; } }
   @media (max-width: 640px) { #hud { left:10px; top:10px; } .panel { padding:8px 10px; } }
-#hint{position:fixed;top:14px;left:50%;transform:translateX(-50%);max-width:min(560px,90vw);padding:10px 16px;border-radius:12px;background:rgba(20,14,10,.78);color:#f3e6d3;font-size:14px;line-height:1.5;text-align:center;pointer-events:none;display:none;z-index:20}
+#hint{display:none!important;position:fixed;top:14px;left:50%;transform:translateX(-50%);max-width:min(560px,90vw);padding:10px 16px;border-radius:12px;background:rgba(20,14,10,.78);color:#f3e6d3;font-size:14px;line-height:1.5;text-align:center;pointer-events:none;display:none;z-index:20}
 </style>
 </head>
 <body>
@@ -81,10 +81,6 @@
       <button id="shadows" aria-pressed="false">그림자</button>
       <button id="music" aria-pressed="true">음악</button>
     </div>
-    <div style="margin-top:7px;font-size:11px;color:#9c9387"><b style="color:#ffd9a8">작업대 앞 제자리에서 체험해요. 시작하면 산타마을 촌장 니콜라스가 문을 열고 들어와 인사해요. 안내(화면 위)를 따라가요.</b>
-      <br>PC: 오른쪽 버튼 드래그 = 둘러보기 · 왼쪽 클릭(누른 채 끌기) = 집기/누르기 · Space = 손 동작 · R 누른 채 = 기울이기 · 휠 = 거리
-      <br>퀘스트3 손: 엄지+검지 집기 / 주먹 = 잡기 · 손가락 끝 = 책·버튼 누르기 · 멀리 있는 것은 손으로 가리키면 빛줄기가 닿고, 그때 집으면 손으로 날아오거나 서랍이 열려요
-      <br>퀘스트3 컨트롤러: 트리거 = 집기(멀리 가리키기 포함) · 그립 = 주먹 · 오른쪽 스틱 = 회전</div>
   </div>
 </div>
 <div id="start">
@@ -148,7 +144,7 @@ import { VRButton } from 'three/addons/webxr/VRButton.js';
 const showErr = (m) => { const e = document.getElementById('err'); e.style.display='block'; e.textContent += m + '\n'; };
 window.addEventListener('error', e => showErr('⚠ ' + e.message));
 let toastT = 0;
-const toast = (m) => { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1600); };
+const toast = () => {};   // no plain text notices during play (VR test feedback)
 
 // ---------------------------------------------------------------- renderer
 const app = document.getElementById('app');
