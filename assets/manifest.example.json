@@ -11,7 +11,7 @@
   },
   "images": {
     "BookPages": "assets/ui/book_pages.webp",
-    "Parchment": "assets/ui/santa_letter.webp"
+    "SantaTalk": "assets/ui/santa_talk.webp"
   },
   "sounds": {
     "bgm": "assets/sounds/bgm.mp3",
