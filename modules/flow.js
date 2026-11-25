@@ -12,6 +12,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 // chalkboard UI kit (rush-xr-ui): Santa's dialogue board, the ingredient marker (ring + arrow) and the hand-motion guide
 import { DialoguePanel, GuidePanel, Marker } from './rush-xr-ui.js';
+// the LUSH recipe book module (modules/recipe-book, used as it came): opening animation, emotion page, recipe page + quests
+import { createRecipeBook } from './recipe-book/src/RecipeBook.js';
+const RB_SCALE = 0.7;                       // the open spread is ~0.6 m wide; 0.7 keeps it the size of the old book in front of you
+const RB_RECIPE = { santa: 'magicalSanta', tree: 'christmasTree', ginger: 'gingerbread', snowman: 'snowmanDreaming', silent: 'silentNight', drift: 'snowdrift' };
 import { createHandLetter } from './hand-letter.js';
 
 // ------------------------------------------------------------------ data (from the original game)
@@ -473,6 +477,7 @@ export class Flow {
     this.book.scale.setScalar(0.75);
     G.add(this.book); this.bookHome = { pos: this.book.position.clone(), quat: this.book.quaternion.clone(), scale: this.book.scale.clone() };
     this.panels.push(this.pages);
+    this.loadRecipeBook();
 
     // work tools
     this.mortar = this.make('mortar', PH.mortar); this.mortar.position.copy(L.mortar); G.add(this.mortar);
@@ -668,6 +673,7 @@ export class Flow {
   clickables() {
     const list = [];
     for (const p of this.panels) if (p.mesh.visible && p.mesh.parent) list.push(p.mesh);
+    if (this.rb && this.s.step === 'emotion') list.push(...this.rb.pageMeshes);
     for (const d of this.drawers) list.push(d.obj, d.tag);
     if (this.lid && this.lid.visible) list.push(this.lid);
     if (this.wrapHandle && this.wrapHandle.visible) list.push(this.wrapHandle);
@@ -675,6 +681,7 @@ export class Flow {
     return list;
   }
   onClick(ray) {
+    if (this.rb && this.s.step === 'emotion' && this.rb.pickFromRay(ray)) { this.sfx('click'); return true; }
     const hits = ray.intersectObjects(this.clickables(), true); if (!hits.length) return false;
     return this.clickHit(hits[0], 'mouse');
   }
@@ -683,6 +690,9 @@ export class Flow {
     const o = h.object;
     const owner = (x) => { for (let q = x; q; q = q.parent) { if (q.userData.panel) return { panel: q.userData.panel }; if (this.drawers.some(d => d.obj === q || d.tag === q)) return { drawer: this.drawers.find(d => d.obj === q || d.tag === q) };
       if (q === this.lid) return { lid: true }; if (q === this.wrapHandle) return { wrap: true }; if (q === this.recvBox) return { recv: true }; } return {}; };
+    if (this.rb && this.rb.pageMeshes.includes(o)) {                         // VR hand ray on the book's emotion page
+      if (h.uv && this.rb.pick(h.uv.x, h.uv.y)) { this.sfx('click'); return true; } return false;
+    }
     const w = owner(o);
     if (w.panel) {
       const id = w.panel.hitUV(h.uv); if (id) this.press(w.panel, id); return !!id;
@@ -705,6 +715,7 @@ export class Flow {
   }
   updateTouch(dt) {
     for (const f of this.fingertips()) {
+      if (this.rb && this.s.step === 'emotion') this.touchBook(f.p);
       const st = (f.slot._touch ||= {});
       for (const pnl of this.panels) {
         if (!pnl.mesh.visible || !pnl.mesh.parent) continue;
@@ -1038,12 +1049,46 @@ export class Flow {
   }
 
   // ================================================================ 01–02 recipe book
+  // The LUSH recipe book replaces the placeholder (cover + canvas pages) inside this.book, so the book still lies on the
+  // desk, rises in front of you when Nicolas is done and goes back to the desk when gathering starts, exactly as before.
+  async loadRecipeBook() {
+    try {
+      const rb = await createRecipeBook({ renderer: this.renderer, assetsUrl: 'modules/recipe-book/assets/' });
+      this.rb = rb;
+      rb.object.scale.setScalar(RB_SCALE);
+      for (const c of [...this.book.children]) c.visible = false;            // the placeholder book
+      this.panels = this.panels.filter(p => p !== this.pages);
+      if (this.garden) this.garden.blockers = this.garden.blockers.filter(b => b !== this.pages.mesh);
+      this.book.add(rb.object);
+      rb.on('change', (st) => this.onBookChange(st));
+      if (['emotion', 'recipe'].includes(this.s.step)) rb.openInstant();     // loaded late: catch up
+    } catch (e) { console.warn('recipe book module:', e); }
+  }
+  bookNormal() { return V(0, 1, 0).applyQuaternion(this.book.getWorldQuaternion(new THREE.Quaternion())); }
+  // a fingertip (VR) on the emotion page: a short ray from just above the tip down onto the page
+  touchBook(p) {
+    const n = this.bookNormal(), ray = new THREE.Raycaster(p.clone().addScaledVector(n, 0.012), n.negate(), 0, 0.024);
+    if (this.rb.pickFromRay(ray)) this.sfx('click');
+  }
+  onBookChange(st) {
+    // an emotion was picked, marked and the page flipped to its recipe: that is the old "choose" + "recipe" step
+    if (this.s.step === 'emotion' && st.state === 'open' && st.page === 'recipe' && RB_RECIPE[st.recipe]) {
+      const e = EMOTIONS.find(x => x.recipe === RB_RECIPE[st.recipe]); if (e) this.chooseEmotion(e.id);
+    }
+  }
+  syncBookQuests() {         // strike the book's ingredients as they go into the mortar (the book strikes them in its own order)
+    const rb = this.rb, r = this.s.recipe; if (!rb || !r || ['emotion', 'recipe'].includes(this.s.step)) return;
+    const sn = rb.snapshot; if (sn.state !== 'open' || sn.page !== 'recipe') return;
+    const want = Math.min(sn.questTotal ?? 5, this.needed().filter(id => this.s.done.has(id)).length);
+    if (sn.questDone < want && performance.now() - (this.rbQuestAt || 0) > 900) { this.rbQuestAt = performance.now(); rb.completeIngredient(); }
+  }
   showEmotionBook() {
     this.s.step = 'emotion';
     this.pages.set({ view: 'choose', selected: null });
     this.scene.attach(this.book);
     const s0 = this.book.scale.x; this.tween(1.0, k => this.book.scale.setScalar(s0 + (1.0 - s0) * k));
     this.follow(this.book, { dist: 0.55, yOff: -0.03, speed: 6, tiltBook: true });
+    this.rb?.open();                                                          // the book's own opening animation
     this.fx.emit(wp(this.book), { color: '#ffe28a', count: 40, speed: 0.5, life: 1 });
     this.setHint('01 마음 고르기', '테이블의 레시피북이 떠올랐어요. 첫 장에서 전하고 싶은 마음을 손가락으로 눌러 골라주세요. (PC: 클릭)');
   }
@@ -1062,6 +1107,11 @@ export class Flow {
     this.s.emotion = e; this.s.recipeId = e.recipe; this.s.recipe = RECIPES[e.recipe]; this.s.step = 'recipe';
     this.pages.set({ selected: id });
     this.fx.emit(wp(this.book), { color: e.color, count: 30, speed: 0.35, life: 0.8 });
+    if (this.rb) {                                                           // the book shows the recipe itself; then it goes back to the desk
+      this.setHint('02 레시피 확인', `'${e.label}'${josa(e.label, '을', '를')} 담은 배쓰밤 레시피예요. 재료를 확인해주세요. 잠시 뒤 책이 작업대로 내려가고 재료 모으기가 시작돼요.`);
+      this.later(4.5, () => { if (this.s.step === 'recipe') this.beginGather(); });
+      return;
+    }
     this.later(0.6, () => { this.pages.set({ view: 'recipe' }); this.setHint('02 레시피 확인', `'${e.label}'${josa(e.label, '을', '를')} 담은 배쓰밤 레시피예요. 재료를 확인하고 오른쪽 페이지의 '제작 시작'을 눌러주세요.`); });
   }
   beginGather() {
@@ -1650,6 +1700,7 @@ export class Flow {
       m.obj.visible = true; m.obj.position.copy(wp(m.target)).add(m.rel); m.obj.update(dt, this.camera);
     }
     this.updateGuide(dt, vq);
+    if (this.rb) { this.rb.update(dt); this.syncBookQuests(); }
     // VR hint panel follows lazily, a bit above the view
     if (this.renderer.xr.isPresenting && (this.hint.state.title || this.hint.state.body)) {
       const m = this.hint.mesh; m.visible = true;
