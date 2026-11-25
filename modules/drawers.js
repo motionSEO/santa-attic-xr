@@ -22,7 +22,7 @@ class DrawerSet {
     // one local-space step = TRAVEL metres along `dir` in the world
     const w0 = cab.getWorldPosition(new THREE.Vector3());
     this.step = cab.worldToLocal(w0.clone().addScaledVector(this.dir, TRAVEL)).sub(cab.worldToLocal(w0.clone()));
-    this.box = new THREE.Box3().setFromObject(cab);
+    this.dirL = cab.worldToLocal(w0.clone().add(this.dir)).sub(cab.worldToLocal(w0.clone())).normalize();
     for (const f of fronts) {
       const b = new THREE.Box3().setFromObject(f), mine = [f];
       for (const s of small) {                           // knob, base and name tag that sit on this front
@@ -31,7 +31,7 @@ class DrawerSet {
       }
       mine.forEach(o => { o.matrixAutoUpdate = true; o.userData.dynamic = true; });   // keep moving (index.html freezes static meshes)
       const knob = mine.find(o => /^Drawer_Knob/.test(o.name));
-      const closedKnob = new THREE.Box3().setFromObject(knob || f).getCenter(new THREE.Vector3());
+      const closedKnob = cab.worldToLocal(new THREE.Box3().setFromObject(knob || f).getCenter(new THREE.Vector3()));   // cabinet space: the cabinet may move later
       const slot = new THREE.Group(); slot.name = f.name + '_contents';       // put whatever lives in this drawer in here
       cab.add(slot); slot.position.copy(cab.worldToLocal(b.getCenter(new THREE.Vector3())));
       this.drawers.push({ name: f.name, parts: mine.map(o => ({ o, base: o.position.clone() })), closedKnob, slot, slotBase: slot.position.clone(), t: 0 });
@@ -39,8 +39,11 @@ class DrawerSet {
     garden.extras.push(this);                          // join the input hub (grab / drop / update)
   }
 
+  // the cabinet can be moved / turned after it is made (conveyor table): positions are kept in cabinet space and turned to world here
+  get box() { return new THREE.Box3().setFromObject(this.cab); }
   get center() { return this.box.getCenter(new THREE.Vector3()); }
-  knobPos(d) { return _v.copy(d.closedKnob).addScaledVector(this.dir, TRAVEL * d.t).clone(); }
+  worldDir() { return this.dirL.clone().transformDirection(this.cab.matrixWorld); }
+  knobPos(d) { return this.cab.localToWorld(d.closedKnob.clone()).addScaledVector(this.worldDir(), TRAVEL * d.t); }
 
   // ---- called by HerbGarden (closed fist / mouse press)
   tryGrab(s) {
@@ -61,7 +64,7 @@ class DrawerSet {
 
   update(dt) {
     for (const [s, g] of this.grabs) {
-      g.d.t = THREE.MathUtils.clamp(g.t0 + _v.copy(s.hold).sub(g.p0).dot(this.dir) / TRAVEL, 0, 1); g.d.shut = false;
+      g.d.t = THREE.MathUtils.clamp(g.t0 + _v.copy(s.hold).sub(g.p0).dot(this.worldDir()) / TRAVEL, 0, 1); g.d.shut = false;
     }
     for (const d of this.drawers) {
       if (d.shut) d.t = Math.max(0, d.t - dt * 0.9);

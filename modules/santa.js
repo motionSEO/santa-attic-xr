@@ -67,6 +67,10 @@ function createSanta(THREE, opts = {}) {
     arms.push(sh);
   }
 
+  // where things he holds go (root space, before scaling): between his hands when he holds them out, and his back pocket
+  const handsAnchor = new THREE.Object3D(); handsAnchor.name = "SantaHands"; handsAnchor.position.set(0, 0.95, 0.4); root.add(handsAnchor);
+  const pocketAnchor = new THREE.Object3D(); pocketAnchor.name = "SantaPocket"; pocketAnchor.position.set(0.2, 0.55, -0.3); root.add(pocketAnchor);
+
   /* ---------- head / face ---------- */
   const head = new THREE.Group(); head.position.set(0, 1.05, 0); body.add(head);
   part(new THREE.SphereGeometry(0.2, 20, 16), M.skin, 0, 0, 0, head, 1, 1.05, 0.95);
@@ -107,7 +111,7 @@ function createSanta(THREE, opts = {}) {
 
   /* ---------- state ---------- */
   const st = {
-    walking: false, talking: false, waving: false,
+    walking: false, talking: false, waving: false, pose: null,
     walkTask: null, turnTask: null, time: 0, nextBlink: 2 + Math.random() * 3, blink: 0, lastStep: 0,
   };
   const tmp = new THREE.Vector3();
@@ -149,6 +153,9 @@ function createSanta(THREE, opts = {}) {
   function setExpression(name) { if (EXPR[name]) expr = name; }
   function talk(on = true, { voice = false } = {}) { st.talking = on; st.voiced = on && voice; }   // voice: a recorded voice is playing, no blips
   function wave(on = true) { st.waving = on; }
+  // arm poses: "offer" = both hands held out in front (giving / taking something), "pocket" = right hand reaching into the
+  // back pocket, null = arms down
+  function pose(name = null) { st.pose = name; }
   function stop() { st.walkTask?.resolve(); st.walkTask = null; st.walking = false; }
 
   function update(dt, lookTarget = null) {
@@ -194,10 +201,16 @@ function createSanta(THREE, opts = {}) {
     }
     // right arm: wave or relax
     // arms[0] = left (+z is down), arms[1] = right (-z is down, +z raises it)
-    const armGoal = st.waving ? 0.5 + Math.sin(t * 8) * 0.35 : -ARM_DOWN;
-    arms[1].rotation.z += (armGoal - arms[1].rotation.z) * Math.min(1, dt * 10);
-    if (st.waving) arms[1].rotation.x *= 0.8;
-    arms[0].rotation.z += (ARM_DOWN - arms[0].rotation.z) * Math.min(1, dt * 10);
+    let armGoal = st.waving ? 0.5 + Math.sin(t * 8) * 0.35 : -ARM_DOWN, armGoal0 = ARM_DOWN, yGoal0 = 0, yGoal1 = 0;
+    if (st.pose === "offer") { armGoal0 = -0.3; yGoal0 = 1.3; armGoal = 0.3; yGoal1 = -1.3; }
+    else if (st.pose === "pocket") { armGoal = -0.75; yGoal1 = 1.1; }
+    const ka = Math.min(1, dt * 8);
+    arms[1].rotation.z += (armGoal - arms[1].rotation.z) * ka;
+    arms[1].rotation.y += (yGoal1 - arms[1].rotation.y) * ka;
+    if (st.waving || st.pose) arms[1].rotation.x *= 0.8;
+    if (st.pose) arms[0].rotation.x *= 0.8;
+    arms[0].rotation.z += (armGoal0 - arms[0].rotation.z) * ka;
+    arms[0].rotation.y += (yGoal0 - arms[0].rotation.y) * ka;
 
     // head sway + look at target
     head.rotation.z = Math.sin(t * 1.5) * (st.talking ? 0.05 : 0.02);
@@ -234,7 +247,8 @@ function createSanta(THREE, opts = {}) {
     object: root,
     parts: { body, head, legs, arms, eyes, pupils, brows, mouth },
     expressions: Object.keys(EXPR),
-    walkTo, turnTo, talk, wave, setExpression, stop, update, dispose,
+    anchors: { hands: handsAnchor, pocket: pocketAnchor },
+    walkTo, turnTo, talk, wave, pose, setExpression, stop, update, dispose,
     get isWalking() { return st.walking; },
   };
 }

@@ -148,6 +148,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.AgXToneMapping;      // matches Blender's AgX view transform
 renderer.toneMappingExposure = 1.23;              // Blender view exposure +0.3 stops = 2^0.3
 renderer.shadowMap.enabled = !LITE;
+renderer.localClippingEnabled = true;   // CONVEYOR: the tables are cut off where they pass through the walls
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.xr.enabled = true;
 app.appendChild(renderer.domElement);
@@ -577,8 +578,9 @@ const swayT = { value: 0 };
 let garden = null, flow = null, turntable = null, jukebox = null, drawerSet = null;
 // where the flow's stations go in the new space (world metres). The desk top is now y 0.905 (LIFT 0.2 in the room setup).
 // Bottles stand on the small 2-tier shelf on the desk (node HerbTray002, turned 63.4 deg): [x, z, floorY, yaw].
+const RACK_DX = -0.14;          // CONVEYOR: the bottle rack sits 14 cm further back on the desk (the herb tray took its front)
 const SPACE_LAYOUT = (() => {
-  const TH = 1.1065, C = [0.526, -0.567], at = (a, b) => [C[0] + 0.448 * a + 0.894 * b, C[1] - 0.894 * a + 0.448 * b];
+  const TH = 1.1065, C = [0.526 + RACK_DX, -0.567], at = (a, b) => [C[0] + 0.448 * a + 0.894 * b, C[1] - 0.894 * a + 0.448 * b];
   const shelf = (a, fy) => [...at(a, 0), fy + 0.001, TH];
   return { bottles: { fairySugar: shelf(-0.13, 1.120), starDust: shelf(0, 1.120), turmeric: shelf(0.13, 1.120), coconutOil: shelf(-0.07, 0.919), benzoin: shelf(0.07, 0.919) } };
 })();
@@ -906,6 +908,14 @@ function onRoom(gltf) {
   root.updateMatrixWorld(true);
   moveW(rollRack, 0.12, 0.60, 0);                          // pivot x 1.01 -> 1.13, base 0.84 -> 1.44
   moveW(root.getObjectByName('MaterialDrawer'), 0.50, 0, -0.04);
+  // ---- CONVEYOR: the work tables pass in front of the player from the right wall to the left wall, and the bookshelf stood right in
+  // that lane. The paper rolls (-> the wrapping table) and the drawer cabinet (-> the making table) leave the shelf, then the shelf
+  // (with its books, angel and mistletoe) moves SHELF_BACK metres back (+x, behind the player's left).
+  const SHELF_BACK = 0.62;
+  root.updateMatrixWorld(true);
+  ['PaperRollRack', 'MaterialDrawer'].forEach(n => { const o = root.getObjectByName(n); if (o) root.attach(o); });
+  ['BookShelf', 'CTRL_Mistletoe'].forEach(n => moveW(root.getObjectByName(n), SHELF_BACK, 0, 0));
+  root.updateMatrixWorld(true);
   // hand-painted cabinet (Substance Painter, from export/Drawers.fbx): every part gets its repainted geometry (new UVs, one shared
   // layout per material) and the matching painted texture set. The new geometry is in metres with its origin at the bottom centre of the
   // whole cabinet; it is dropped on the cabinet's current bottom centre and converted back into each part's own local space, so the
@@ -981,7 +991,7 @@ function onRoom(gltf) {
     const BGM = ['Sleigh-Bell Shuffle.mp3', 'Untitled.mp3', 'Vintage Christmas Jazz.mp3'].map(n => 'Sound/BGM/' + encodeURIComponent(n));
     jukebox = new Jukebox(BGM.length); window.jukebox = jukebox;
     // table: model is 0.82 high, top surface 0.407 above its centre; scale 0.8 -> 0.66 m high, 0.76 m across
-    const TB = new THREE.Vector3(1.9, 0.005, 0.78), TS = 0.8, tableTop = TB.y + (0.413 + 0.407) * TS;
+    const TB = new THREE.Vector3(2.2, 0.005, 0.25), TS = 0.8, tableTop = TB.y + (0.413 + 0.407) * TS;
     const table = new Prop(scene, 'table', { scale: TS, position: TB, rotationY: 0, garden });
     if (garden) garden.colliders.push(table.mesh);                                              // things can be set down on it
     const TT = 0.42;
@@ -1048,6 +1058,26 @@ function onRoom(gltf) {
     tp.needsUpdate = true; tg.computeBoundingBox(); tg.computeBoundingSphere();
     trayN.position.x += 1.15 - mean;                                            // centre at the player's x (~1.07..1.15)
   }
+  // ---- CONVEYOR table 1 (making): every ingredient on the one desk in front. Herb tray from the side desk -> front-right corner of the
+  // desk (turned along it), the bottle rack 14 cm further back to make room, the mug to the back, the left legs under the desk end.
+  // The drawer cabinet joins after DrawerSet is made (below). modules/conveyor.js moves the whole desk out through the left wall later.
+  const placeW = (o, yaw, x, z, dy = 0) => {        // turn an object about its own centre (world y axis) and put that centre at x, z
+    if (!o) return; scene.updateMatrixWorld(true);
+    const c = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), par = o.parent, piv = new THREE.Group();
+    scene.add(piv); piv.position.set(c.x, 0, c.z); piv.updateMatrixWorld(true); piv.attach(o);
+    piv.rotation.y = yaw; piv.position.set(x, dy, z); piv.updateMatrixWorld(true); par.attach(o); piv.removeFromParent();
+  };
+  placeW(trayN, Math.PI / 2, 0.695, -0.555);
+  moveW(root.getObjectByName('HerbTray002'), RACK_DX, 0, 0);
+  placeW(root.getObjectByName('MugCup'), 0, 0.26, -0.12);
+  ['Cube009', 'Cube026'].forEach(n => {               // the desk's left legs were short (hidden by the shelf): full height, under the top
+    const o = root.getObjectByName(n); if (!o || !o.isMesh) return;
+    o.updateWorldMatrix(true, false); const inv = o.matrixWorld.clone().invert(), P = o.geometry.attributes.position, V = new THREE.Vector3();
+    for (let i = 0; i < P.count; i++) { V.fromBufferAttribute(P, i).applyMatrix4(o.matrixWorld); if (V.y > 0.3) V.y += LIFT; V.applyMatrix4(inv); P.setXYZ(i, V.x, V.y, V.z); }
+    P.needsUpdate = true; o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere();
+    moveW(o, 0, 0, -0.13);
+  });
+  { const rolls = root.getObjectByName('PaperRollRack'); if (rolls) rolls.visible = false; }   // shown on the wrapping table (conveyor.js)
   if (HerbGarden) try {   // herbs.js: edit there, both pages follow
     let picked = 0;
     garden = new HerbGarden(root, scene, { colliders: [root], onHarvest: (label, k, it) => toast(`${label} ${it?.count || 1}개 채취 · 모두 ${picked += (it?.count || 1)}개`) });
@@ -1059,6 +1089,9 @@ function onRoom(gltf) {
   try {   // drawers.js moves front + knob + name tag; the flow decides when a drawer opens (click / point / touch), so it gets its own hub
     if (DrawerSet) { drawerSet = new DrawerSet(root, scene, { extras: [], ray: new THREE.Raycaster() }); window.__drawers = drawerSet; }
     paperTags(root);
+    // CONVEYOR: the cabinet stands on the back-left of the making desk, its drawers facing the player (+x)
+    const cab = root.getObjectByName('MaterialDrawer');
+    if (cab) { root.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(cab); placeW(cab, -Math.PI / 2, 0.29, 0.47, 0.906 - b.min.y); }
   } catch (e) { console.error(e); showErr('drawers: ' + e.message); }
   // these move at run time: keep them out of the static freeze below
   garden?.plants.forEach(p => { p.mesh.userData.dynamic = true; });
@@ -1154,7 +1187,7 @@ function onRoom(gltf) {
   document.getElementById('loading').classList.add('done');
   // the experience: Nicolas comes in through the door and greets you -> recipe book -> make a bath bomb -> wrap -> letter -> send
   import('./modules/flow.js').then(({ startFlow }) => {
-    flow = startFlow({ scene, root, camera, renderer, rig, garden, canvas: renderer.domElement, toast, P, cast, drawerSet, layout: SPACE_LAYOUT,
+    flow = startFlow({ colliders, scene, root, camera, renderer, rig, garden, canvas: renderer.domElement, toast, P, cast, drawerSet, layout: SPACE_LAYOUT,
       door: root.getObjectByName('DoorLeaf'), view: { get: () => [yaw, pitch], set: (y, p) => { yaw = y; pitch = p; }, home: [STAND.yaw, STAND.pitch] },
       hintEl: document.getElementById('hint'), fire: { setLevel: (k) => fireFx.setLevel?.(k) } });
     window.__flow = flow;

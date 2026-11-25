@@ -13,6 +13,9 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 // chalkboard UI kit (rush-xr-ui): Santa's dialogue board, the ingredient marker (ring + arrow) and the hand-motion guide
 import { DialoguePanel, GuidePanel, Marker } from './rush-xr-ui.js';
 import { createHandLetter } from './hand-letter.js';
+// the three work tables pass in front of the player like on a conveyor belt (making -> wrapping -> basin)
+import { createConveyor, LANE } from './conveyor.js';
+const END_WAIT = 25;           // seconds the end cards stay before Nicolas says goodbye and leaves
 
 // ------------------------------------------------------------------ data (from the original game)
 // opening: Santa (Nicolas, the village chief) opens the door, walks in, waves and says these lines
@@ -79,22 +82,26 @@ const L = {
   // arm's reach on the lifted desk (x 0.16..0.82, z -0.81..0.68, top y 0.905): left (+z) basket + fir, book, mold; centre mortar;
   // right (-z) board, knife, mug and the 2-tier bottle shelf; herb tray on the side desk to the right; drawer cabinet behind-left
   stand:   new THREE.Vector3(1.07, 0, 0),
-  book:    new THREE.Vector3(0.42, DESK_Y, 0.25),
+  book:    new THREE.Vector3(0.42, DESK_Y, 0.13),
   mortar:  new THREE.Vector3(0.63, DESK_Y, 0.02),
   pestle:  new THREE.Vector3(0.72, DESK_Y + 0.012, 0.13),
   board:   new THREE.Vector3(0.55, DESK_Y, -0.20),
-  knife:   new THREE.Vector3(0.40, DESK_Y + 0.006, -0.16),
+  knife:   new THREE.Vector3(0.40, DESK_Y + 0.006, -0.21),
   mold:    new THREE.Vector3(0.70, DESK_Y, 0.24),
   basket:  new THREE.Vector3(0.64, DESK_Y, 0.52),
   bottles: { fairySugar: [0.765, -0.62], starDust: [0.765, -0.70], benzoin: [0.765, -0.78], turmeric: [0.68, -0.66], coconutOil: [0.68, -0.75] },   // index.html puts them on the shelf
-  firPot:  new THREE.Vector3(0.40, DESK_Y, 0.53),
+  firPot:  new THREE.Vector3(0.47, DESK_Y, 0.60),
   drawers: ['rosewood', 'cedarwood', 'cinnamon', 'vanilla', 'eucalyptus', 'ginger'],
-  drawerOut: new THREE.Vector3(0.30, DESK_Y + 0.06, -0.02),   // drawer items fly over and land here, in front of the player
+  drawerOut: new THREE.Vector3(0.46, DESK_Y + 0.06, 0.33),    // drawer items fly over from the cabinet (back-left of the desk) and land here
   wrap:    new THREE.Vector3(0.62, DESK_Y, 0.02),
   letter:  new THREE.Vector3(0.58, DESK_Y, 0.06),
   santa:   new THREE.Vector3(-0.45, 0, -0.55),               // where Nicolas stops to greet you (across the desk, left of the door)
   santaAside: new THREE.Vector3(-0.72, 0, -1.25),            // where he stands and watches once the recipe book is open
-  basin:   new THREE.Vector3(1.38, 0, 0.30),
+  // CONVEYOR: the bath bomb / received gift float here while the tables change (above the passing tables, in front of the player)
+  hold:    new THREE.Vector3(0.64, 1.30, 0.02),
+  rolls:   new THREE.Vector3(0.30, DESK_Y, 0.02),               // the paper rolls on the wrapping table (back, middle)
+  santaGive: new THREE.Vector3(1.22, 0, -1.15),               // Nicolas stands here (player's right, past the side desk) to take / give
+  basin:   new THREE.Vector3(0.58, DESK_Y, -0.065),            // the basin in the middle of the basin table
   chimney: new THREE.Vector3(-0.42, 0.45, 0.50)              // index.html sets it from the fireplace logs
 };
 
@@ -148,6 +155,18 @@ class Panel {
 }
 
 Panel.all = [];
+
+// bubbly foam for the basin (canvas: lots of small soft rings, white in the middle, thinner toward the edge)
+function foamTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
+  for (let i = 0; i < 900; i++) {
+    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 250, x = 256 + Math.cos(a) * r, y = 256 + Math.sin(a) * r, s = 3 + Math.random() * 12 * (1 - r / 300);
+    g.beginPath(); g.arc(x, y, s, 0, Math.PI * 2);
+    g.fillStyle = `rgba(255,255,255,${0.25 + 0.5 * (1 - r / 256)})`; g.fill();
+    g.lineWidth = 1.5; g.strokeStyle = 'rgba(255,255,255,0.9)'; g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
 
 // ------------------------------------------------------------------ particles
 class FX {
@@ -340,6 +359,15 @@ const PH = {
     const seal = mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.003, 16), mat(0xb8322c)); seal.position.y = 0.0055; g.add(seal);
     return g;
   },
+  basinBowl() {        // CONVEYOR: a stone basin standing on the basin table (no pedestal)
+    const g = new THREE.Group();
+    const prof = [[0, 0], [0.13, 0], [0.2, 0.04], [0.235, 0.12], [0.24, 0.15], [0.225, 0.15], [0.205, 0.105], [0.12, 0.05], [0, 0.05]].map(([r, y]) => new THREE.Vector2(r, y));
+    g.add(mesh(new THREE.LatheGeometry(prof, 40), mat(0x8a8276, { roughness: 0.9 })));
+    const water = new THREE.Mesh(new THREE.CircleGeometry(0.212, 40).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x3fa7d6, emissive: 0x1a6aa0, emissiveIntensity: 0.9, roughness: 0.1, transparent: true, opacity: 0.9 }));
+    water.position.y = 0.125; water.name = 'BasinWater'; g.add(water);
+    g.userData.water = water; return g;
+  },
   basin() {
     const g = new THREE.Group();
     const ped = mesh(new THREE.CylinderGeometry(0.07, 0.11, 0.72, 16), mat(0x7d7468, { roughness: 1 })); ped.position.y = 0.36; g.add(ped);
@@ -517,9 +545,23 @@ export class Flow {
         this.drawers.push({ obj: d, id, c, tag, p0, open: false, delta: local, item: null });
       });
     }
-    // magic basin near the fireplace
-    this.basin = this.make('basin', PH.basin); this.basin.position.copy(L.basin); G.add(this.basin);
-    this.zones.basin = { obj: this.basin, off: V(0, 0.86, 0), r: 0.24, hover: 0.18 };
+    // CONVEYOR (modules/conveyor.js): table 1 = this desk; table 2 = wrapping (the paper rolls from the bookshelf on it);
+    // table 3 = a water basin. Tables 2 and 3 wait behind the right wall. The fireplace no longer takes part: it just glows.
+    this.conv = createConveyor({ scene: this.scene, root: this.root, colliders: this.colliders || [], garden: this.garden });
+    this.table2 = this.conv.deskCopy('Table2_Wrapping');
+    const rolls = this.root.getObjectByName('PaperRollRack');
+    if (rolls) {
+      rolls.visible = true; this.root.updateMatrixWorld(true);
+      const bb = new THREE.Box3().setFromObject(rolls), sz = bb.getSize(V());
+      const piv = new THREE.Group(); this.root.add(piv); piv.position.copy(bb.getCenter(V())).setY(bb.min.y); piv.updateMatrixWorld(true); piv.attach(rolls);
+      if (sz.x > sz.z) piv.rotation.y = Math.PI / 2;                // rolls lie along the table
+      piv.position.set(L.rolls.x, DESK_Y + 0.002, L.rolls.z + this.table2.position.z);   // the table waits behind the wall
+      piv.updateMatrixWorld(true); this.table2.attach(rolls); piv.removeFromParent();
+      this.conv.live(rolls); this.conv.clip(rolls);
+    }
+    this.table3 = this.conv.deskCopy('Table3_Basin');
+    this.basin = this.make('basin', PH.basinBowl); this.basin.position.copy(L.basin); this.table3.add(this.basin); this.conv.clip(this.basin);
+    this.zones.basin = { obj: this.basin, off: V(0, 0.13, 0), r: 0.22, hover: 0.12 };
 
     // floating hint panel for VR (PC uses the DOM hint)
     this.hint = new Panel({ w: 0.5, h: 0.15, px: 1000, name: 'HintPanel', draw: (g, P) => {
@@ -671,7 +713,7 @@ export class Flow {
     for (const d of this.drawers) list.push(d.obj, d.tag);
     if (this.lid && this.lid.visible) list.push(this.lid);
     if (this.wrapHandle && this.wrapHandle.visible) list.push(this.wrapHandle);
-    if (this.recvBox && this.recvBox.visible) list.push(this.recvBox);
+    if (this.recvBox && this.recvBox.visible && this.s.step === 'receive') list.push(this.recvBox);   // later it is grabbed, not clicked
     return list;
   }
   onClick(ray) {
@@ -689,7 +731,7 @@ export class Flow {
     } else if (w.drawer) this.toggleDrawer(w.drawer);
     else if (w.lid) this.lidClick();
     else if (w.wrap) this.coverWrap();
-    else if (w.recv) this.openReceived();
+    else if (w.recv) this.takeGift();
     else return false;
     return true;
   }
@@ -718,12 +760,12 @@ export class Flow {
       }
       // drawers: touch the front
       for (const d of this.drawers) {
-        const near = f.p.distanceTo(wp(d.obj)) < 0.09 && f.p.z < d.c.z + 0.06;
+        const near = f.p.distanceTo(wp(d.obj)) < 0.09 && f.p.x > d.c.x - 0.06;   // CONVEYOR: the cabinet faces the player (+x)
         if (near && !st['d' + d.id]) { st['d' + d.id] = true; this.toggleDrawer(d); }
         else if (!near && f.p.distanceTo(wp(d.obj)) > 0.14) st['d' + d.id] = false;
       }
       // received gift: touch it
-      if (this.recvBox?.visible && this.s.step === 'receive' && f.p.distanceTo(wp(this.recvBox, V(0, 0.05, 0))) < 0.12) this.openReceived();
+      if (this.recvBox?.visible && this.s.step === 'receive' && f.p.distanceTo(wp(this.recvBox, V(0, 0.05, 0))) < 0.12) this.takeGift();
       // wrap handle: pinch it and lay it over the bath bomb (or just touch it)
       if (this.wrapHandle?.visible && this.s.step === 'wrapCover' && f.p.distanceTo(wp(this.wrapHandle)) < 0.05) this.coverWrap();
     }
@@ -747,7 +789,7 @@ export class Flow {
     if (st === 'press') return this.closeLid();
     if (st === 'open') return this.openLid();
     if (st === 'wrapCover') return this.coverWrap();
-    if (st === 'receive') return this.openReceived();
+    if (st === 'receive') return this.takeGift();
     if (this.board.userData.item && !o) this.toast('칼을 먼저 집어주세요');
   }
 
@@ -1217,7 +1259,7 @@ export class Flow {
   }
   spawnDrawerItem(d) {
     const id = d.id, it = this.make('ing_' + id, () => PH.stick(id));
-    const p = d.c.clone().add(V(0, 0.03, -0.17));
+    const p = d.c.clone().add(V(0.17, 0.03, 0));    // CONVEYOR: out of the front of the cabinet, which faces the player (+x)
     it.position.copy(this.group.worldToLocal(p.clone())); this.group.add(it);
     it.userData.ing = id; d.item = it;
     if (ING[id].action === 'break' || ING[id].action === 'tear') it.userData.breakable = true;
@@ -1388,26 +1430,59 @@ export class Flow {
     }
   }
 
-  // ================================================================ 08 wrapping
+  // ================================================================ conveyor: one table out to the left, the next one in from the right
+  // modules/conveyor.js. Table 1 is the room's desk: when the bath bomb is done, the desk and everything still standing on it ride out.
+  t1Objects() {
+    const keep = new Set([this.bomb, this.hint?.mesh]);
+    const onT1 = (o) => { const p = wp(o); return p.x > LANE.x0 - 0.12 && p.x < LANE.x1 + 0.06 && p.z > -0.95 && p.z < 0.9 && p.y > 0.6 && p.y < 1.6; };
+    const flowObjs = this.group.children.filter(o => !keep.has(o) && o.visible !== false && onT1(o));
+    const room = ['Desk', 'Cube008', 'Cube010', 'Cube023', 'Cube009', 'Cube026', 'HerbTray', 'HerbTray002', 'MugCup', 'MaterialDrawer'].map(n => this.root.getObjectByName(n));
+    const loose = (this.garden?.items || []).map(it => it.mesh || it.obj).filter(o => o && o.parent && onT1(o));   // picked herbs left lying on the desk
+    this.unfollow(this.book);
+    return [...room, this.book, ...flowObjs, ...loose];
+  }
+  beltSound(dur) {
+    try {
+      const ac = this.actx ||= new AudioContext(); if (ac.state === 'suspended') ac.resume();
+      const n = ac.sampleRate * dur, buf = ac.createBuffer(1, n, ac.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (0.5 + 0.5 * Math.sin(i / ac.sampleRate * 40));
+      const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(), t = ac.currentTime;
+      f.type = 'lowpass'; f.frequency.value = 220; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.05, t + 0.8);
+      g.gain.setValueAtTime(0.05, t + dur - 1); g.gain.linearRampToValueAtTime(0, t + dur);
+      src.buffer = buf; src.connect(f).connect(g).connect(ac.destination); src.start(t);
+    } catch (e) { /* no audio */ }
+  }
+  runBelt(outgoing, incoming, dur = 6.5) { this.beltSound(dur); return this.conv.step(outgoing, incoming, dur); }
+
+  // ================================================================ 08 wrapping (table 2)
   toWrap() {
     this.s.step = 'wrapPrep';
-    this.setHint('08 포장 준비', '작업대를 정리하고 포장지를 펼쳤어요.');
-    // clear the work tools away
-    for (const o of [this.mortar, this.pestle, this.board, this.knife, this.decorObj, this.mold]) {
-      if (!o) continue; this.forceRelease(o); this.ungrab(o);
-      const s0 = o.scale.clone(); this.tween(0.5, k => o.scale.copy(s0).multiplyScalar(Math.max(0.001, 1 - k)), () => o.visible = false);
-    }
-    // the bath bomb floats up, the wrapping paper is laid out
-    const bomb = this.bomb; this.group.attach(bomb);
-    const up = wp(this.mold || bomb).add(V(0.06, 0, 0.14)); up.y = DESK_Y; this.tweenTo(bomb, up, new THREE.Quaternion(), 0.8, () => this.restBelow(bomb));
-    this.wrap = this.make('wrapPaper', () => PH.wrapPaper(this.wrapTex)); this.wrap.position.copy(L.wrap); this.wrap.rotation.y = Math.PI / 2; this.group.add(this.wrap);
+    this.setHint('08 포장 준비', '작업대가 왼쪽 벽 너머로 넘어가고, 포장 테이블이 오른쪽에서 들어와요.');
+    this.setMarkers([]); this.setGuide(null);
+    for (const o of [...this.grabs]) { if (o === this.bomb) continue; this.forceRelease(o); this.ungrab(o); }
+    // the bath bomb floats up in front of the player (above the passing tables) and waits there
+    const bomb = this.bomb; this.forceRelease(bomb); this.ungrab(bomb); this.group.attach(bomb);
+    this.tweenTo(bomb, L.hold.clone(), new THREE.Quaternion(), 0.9, () => this.float(bomb, L.hold));
+    this.later(1.0, () => {
+      this.conv.adopt(this.conv.t1, this.t1Objects());
+      this.runBelt(this.conv.t1, this.table2).then(() => this.unrollWrap());
+    });
+  }
+  // the paper is pulled off the roll on the wrapping table and spreads out in the middle of it
+  unrollWrap() {
+    this.wrap = this.make('wrapPaper', () => PH.wrapPaper(this.wrapTex)); this.wrap.rotation.y = Math.PI / 2; this.group.add(this.wrap);
+    const from = L.rolls.clone().setY(DESK_Y), to = L.wrap.clone();
+    this.wrap.position.copy(from); this.wrap.scale.set(1, 1, 0.05);
+    this.sfx('wrap');
+    this.tween(0.9, k => { const e = ease.out(k); this.wrap.position.lerpVectors(from, to, e); this.wrap.scale.set(1, 1, 0.05 + 0.95 * e); });
     this.wrapHandle = this.wrap.userData.placeholder.userData.handle;
     this.wrapHandle.visible = false;
     this.zones.wrap = { obj: this.wrap, off: V(0, 0.01, 0), r: 0.14, hover: 0.1 };
-    this.later(0.9, () => {
+    this.later(1.0, () => {
       this.s.step = 'wrap';
-      this.grab(bomb, { modes: ['pinch', 'fist'], reach: 0.05 }); bomb.userData.home = { pos: up.clone(), quat: new THREE.Quaternion() };
-      this.setHint('08 포장', '떠 있는 배쓰밤을 잡아 포장지 위에 올려주세요.');
+      const bomb = this.bomb;
+      this.grab(bomb, { modes: ['pinch', 'fist'], reach: 0.05 }); bomb.userData.home = { pos: L.hold.clone(), quat: new THREE.Quaternion() };
+      this.setHint('08 포장', '떠 있는 배쓰밤을 잡아 포장 테이블의 포장지 위에 올려주세요.');
       this.setMarkers([bomb]);
     });
   }
@@ -1433,8 +1508,8 @@ export class Flow {
     this.later(1.6, () => this.toLetter());
   }
 
-  // ================================================================ 09 hand letter (modules/hand-letter.js)
-  // A big letter paper stands in front of the player (on a thin stand down to the floor). Pick up the pencil next to it
+  // ================================================================ 09 hand letter (modules/hand-letter.js), on the wrapping table
+  // A big letter paper stands in front of the player (its stand goes down to the wrapping table). Pick up the pencil next to it
   // and write with the pencil tip (Quest hands: pinch / fist, controllers: trigger / grip, PC: hold the left button and drag).
   // [지우기] 1 s / [보내기] 0.7 s held down. Sending folds the letter and it flies away, then it becomes the envelope.
   toLetter() {
@@ -1445,7 +1520,7 @@ export class Flow {
         renderer: this.renderer, scene: this.scene, camera: this.camera, parent: this.rig || this.scene,
         lang: 'ko', texts: { dear: '이름 모를 산타에게' }, storageKey: 'santa-attic-hand-letter-pose',
         addLight: false,                                   // the attic has its own lights (a hemisphere light would light the whole room)
-        floorY: () => this.P?.feet?.y ?? 0,
+        floorY: () => DESK_Y,                              // the stand rests on the wrapping table
       });
       // the room renders with AgX tone mapping: keep the paper, buttons and handles at the colours of the design
       for (const o of [hl.letter.group, hl.letter.stand, hl.letter.shadow]) o.traverse((m) => { if (m.isMesh && m.material.isMeshBasicMaterial) m.material.toneMapped = false; });
@@ -1460,73 +1535,189 @@ export class Flow {
   }
   finishLetter() {
     if (this.s.step !== 'letter') return;
-    this.s.step = 'sendPrep';
+    this.s.step = 'givePrep';
     this.toast('편지 완성');
     this.handLetter?.hide();
     this.env = this.make('envelope', PH.envelope); this.env.position.copy(this.group.worldToLocal(L.letter.clone().add(V(0, 0.01, 0)))); this.group.add(this.env);
-    this.later(0.7, () => this.toSend());
+    this.later(0.7, () => this.toGive());
   }
 
-  // ================================================================ send through the magic basin
-  toSend() {
-    this.s.step = 'send'; this.sent = 0;
+  // ================================================================ 10 hand the gift and the letter to Nicolas
+  // He comes over to the player's right (across the empty side desk) and holds out his hands. Each thing let go over his hands goes
+  // into his hands, then into his back pocket.
+  santaSay(text, secs = 4) {
+    const S = this.santa; if (!S) return;
+    if (!this.bubble) { const p = PH.talkPanel(); this.scene.add(p.mesh); this.bubble = { panel: p }; }
+    const B = this.bubble; B.panel.mesh.visible = true; B.until = secs; B.panel.board.say(text);
+    S.talk(true); S.setExpression('happy');
+  }
+  updateBubble(dt) {
+    const B = this.bubble, S = this.santa; if (!B || !S || !B.panel.mesh.visible) return;
+    B.panel.board.update(dt);
+    if (B.panel.board.done) S.talk(false);
+    B.until -= dt; if (B.until <= 0) { B.panel.mesh.visible = false; S.talk(false); return; }
+    const head = this.headPos(), m = B.panel.mesh, p = S.object.position;
+    const face = S.parts?.head ? wp(S.parts.head) : V(p.x, p.y + 1.6, p.z);
+    const toHead = V(head.x - face.x, 0, head.z - face.z).normalize(), right = V(toHead.z, 0, -toHead.x);
+    m.position.copy(face).addScaledVector(right, 0.28 + B.panel.w / 2).addScaledVector(toHead, 0.15); m.lookAt(head);
+  }
+  santaWalk(to, opts = {}) {
+    this.santaWalking = true;
+    return this.santa.walkTo(to, { speed: 0.6, ...opts }).then(() => { this.santaWalking = false; return this.santa.turnTo(this.headPos(), 0.6); });
+  }
+  toGive() {
+    this.s.step = 'give'; this.given = 0;
     const a = wp(this.gift), b = L.letter.clone().add(V(0.2, 0.28, 0.12));
     this.tweenTo(this.env, b, null, 0.8, () => this.restBelow(this.env));
-    for (const o of [this.gift, this.env]) { this.grab(o, { modes: ['pinch', 'fist'], reach: 0.06 }); }
+    for (const o of [this.gift, this.env]) this.grab(o, { modes: ['pinch', 'fist'], reach: 0.06 });
     this.gift.userData.home = { pos: a, quat: new THREE.Quaternion() }; this.env.userData.home = { pos: b, quat: new THREE.Quaternion() };
-    this.basin.userData.placeholder.userData.water.material.emissiveIntensity = 1.6;
-    this.setHint('09 마법 수반으로 발송', '떠 있는 선물과 편지를 하나씩 잡아, 왼쪽의 마법 수반 위에서 놓아주세요. 수반 위에서 손을 놓으면 물속으로 쏙 들어가요.');
-    this.setMarkers([this.gift, this.env, { obj: this.basin, off: V(0, 0.86, 0) }]);
+    this.zones.santa = { obj: this.santa ? this.santa.anchors.hands : this.gift, off: V(0, 0, 0), r: 0.3, hover: 0.04 };
+    this.setHint('10 니콜라스에게 전달', '니콜라스가 오고 있어요.');
+    const ready = () => {
+      this.santa?.pose('offer');
+      this.santaSay('포장한 선물과 편지는 내가 전해줄게요. 이리 주세요!', 5);
+      this.setHint('10 니콜라스에게 전달', '선물과 편지를 하나씩 잡아 니콜라스가 내민 손 위에서 놓아주세요. (PC: 클릭한 채 니콜라스의 손 위로 끌어가 놓기)');
+      this.setMarkers([this.gift, this.env, { obj: this.santa.anchors.hands, off: V(0, 0, 0) }]);
+    };
+    if (this.santa) this.santaWalk(L.santaGive).then(ready); else ready();
   }
-  sink(o) {
-    this.forceRelease(o); this.ungrab(o); this.unfloat(o); this.sfx('splash');
-    const c = this.zonePoint(this.zones.basin), p0 = wp(o), s0 = o.scale.clone();
-    this.tween(0.9, k => { o.position.copy(this.group.worldToLocal(p0.clone().lerp(c, ease.inOut(k)))); o.scale.copy(s0).multiplyScalar(1 - k * 0.9); }, () => o.visible = false, o);
-    this.fx.emit(c, { color: '#9be0ff', count: 50, speed: 0.4, gravity: 1.2, life: 0.8, dir: V(0, 1, 0) });
-    this.sent++;
-    if (this.sent === 1) this.toast('하나 더! 남은 것도 수반에 넣어주세요.');
-    if (this.sent >= 2) this.later(1.0, () => this.flying());
-  }
-  flying() {
-    this.s.step = 'flying'; this.setMarkers([]);
-    this.setHint('선물이 날아가고 있어요…', '당신의 배쓰밤과 편지가 세상 어딘가의 이름 모를 누군가에게 전해지고 있어요.');
-    const c = this.zonePoint(this.zones.basin);
-    let t = 0; this.tween(3.5, k => { t += 1; if (t % 2) this.fx.emit(c.clone().lerp(L.chimney.clone().add(V(0, 1.2, 0)), k), { color: '#bfe9ff', count: 6, speed: 0.15, life: 1.2 }); this.fire?.setLevel(1 + 0.5 * Math.sin(k * Math.PI)); });
-    this.later(4.5, () => this.receive());
+  giveToSanta(o) {
+    this.forceRelease(o); this.ungrab(o); this.unfloat(o); this.sfx('click');
+    const S = this.santa, hands = wp(S.anchors.hands);
+    this.tweenTo(o, hands, null, 0.35, () => {
+      // into the back pocket
+      S.pose('pocket');
+      this.later(0.45, () => {
+        const s0 = o.scale.clone(), p0 = wp(o);
+        this.tween(0.6, k => { o.position.copy(this.group.worldToLocal(p0.clone().lerp(wp(S.anchors.pocket), ease.inOut(k)))); o.scale.copy(s0).multiplyScalar(1 - 0.85 * k); },
+          () => { o.visible = false; if (this.given < 2 || this.s.step === 'give') S.pose('offer'); });
+      });
+    });
+    this.given++;
+    if (this.given === 1) this.toast('하나 더! 남은 것도 니콜라스에게 건네주세요.');
+    if (this.given >= 2) { this.s.step = 'given'; this.setMarkers([]); this.later(1.6, () => this.receive()); }
   }
 
-  // ================================================================ ending: another Santa's gift
+  // ================================================================ 11 Nicolas takes another Santa's gift out of his back pocket
   receive() {
-    this.s.step = 'receive'; this.sfx('arrive');
+    this.s.step = 'receivePrep';
+    const S = this.santa;
     const others = Object.keys(RECIPES).filter(k => k !== this.s.recipeId);
     this.recvId = others[Math.floor(Math.random() * others.length)];
-    this.recvBox = this.make('giftBox', () => PH.giftBox(this.wrapTex, '#bfe6ff'));
-    this.recvBox.position.copy(L.chimney); this.recvBox.scale.setScalar(0.3); this.group.add(this.recvBox);
-    this.fx.emit(L.chimney, { color: '#ffb35a', count: 60, speed: 0.6, gravity: -0.4, life: 1.2 });
-    const a = L.chimney.clone(); let t = 0;
-    this.recvFlight = (dt) => {
-      t += dt; const k = Math.min(1, t / 2.4), e = ease.inOut(k);
-      const d = this.viewFront(0.55, -0.12), mid = a.clone().lerp(d, 0.5).add(V(0, 0.5, 0));
-      this.recvBox.position.copy(this.group.worldToLocal(a.clone().lerp(mid, e).lerp(mid.clone().lerp(d, e), e)));
-      this.recvBox.scale.setScalar(0.3 + 0.7 * e); this.recvBox.rotation.y += dt * 2;
-      if (k >= 1) { this.recvFlight = null; this.follow(this.recvBox, { dist: 0.55, yOff: -0.12, speed: 3, face: false }); }
-    };
-    this.setHint('다른 산타의 선물이 도착했어요!', '떠오른 선물 상자를 손으로 만져 열어보세요. (PC: 클릭 또는 Space)');
+    this.santaSay('고마워요! 그럼… 이건 다른 산타가 당신에게 보낸 선물이에요.', 5);
+    this.setHint('다른 산타의 선물', '니콜라스가 뒷주머니에서 무언가를 꺼내요.');
+    S.pose('pocket');
+    this.later(0.9, () => {
+      this.recvBox = this.make('giftBox', () => PH.giftBox(this.wrapTex, '#bfe6ff'));
+      this.recvBox.position.copy(this.group.worldToLocal(wp(S.anchors.pocket))); this.recvBox.scale.setScalar(0.3); this.group.add(this.recvBox);
+      S.pose('offer');
+      const p0 = wp(this.recvBox);
+      this.tween(0.8, k => { const e = ease.inOut(k); this.recvBox.position.copy(this.group.worldToLocal(p0.clone().lerp(wp(S.anchors.hands, V(0, -0.03, 0)), e))); this.recvBox.scale.setScalar(0.3 + 0.7 * e); },
+        () => {
+          this.s.step = 'receive'; this.sfx('arrive');
+          this.setHint('다른 산타의 선물이 도착했어요!', '니콜라스가 내민 선물 상자를 손으로 만지거나 잡아서 받아주세요. (PC: 클릭)');
+          this.setMarkers([this.recvBox]);
+        });
+    });
   }
-  openReceived() {
-    if (this.s.step !== 'receive' || !this.recvBox || this.recvFlight) return;
+  // the box comes over and floats in front of the player; Nicolas steps back; the wrapping table leaves and the basin table comes in
+  takeGift() {
+    if (this.s.step !== 'receive' || !this.recvBox) return;
+    this.s.step = 'toBasin';
+    const box = this.recvBox; this.stopTween(box);
+    this.setMarkers([]);
+    this.tweenTo(box, L.hold.clone(), new THREE.Quaternion(), 0.8, () => this.float(box, L.hold));
+    this.santa?.pose(null);
+    if (this.santa) this.later(0.6, () => this.santaWalk(L.santaAside));
+    this.setHint('수반 테이블', '포장 테이블이 넘어가고, 수반이 있는 테이블이 들어와요.');
+    const rest = this.group.children.filter(o => o !== box && o !== this.hint?.mesh && (() => { const p = wp(o); return p.x > LANE.x0 - 0.1 && p.x < LANE.x1 + 0.05 && p.y > 0.8 && p.y < 1.3 && Math.abs(p.z - LANE.stopZ) < 0.9; })());
+    this.later(1.2, () => {
+      this.conv.adopt(this.table2, rest);
+      this.runBelt(this.table2, this.table3).then(() => {
+        this.s.step = 'basin';
+        this.grab(box, { modes: ['pinch', 'fist'], reach: 0.06 }); box.userData.home = { pos: L.hold.clone(), quat: new THREE.Quaternion() };
+        this.setHint('12 수반', '선물 상자를 잡아 수반 위에서 놓아주세요. 포장이 풀리고 배쓰밤이 물에 녹아요.');
+        this.setMarkers([box, { obj: this.basin, off: V(0, 0.16, 0) }]);
+      });
+    });
+  }
+
+  // ================================================================ 12 the gift on the basin: the paper tears open, the bath bomb fizzes and melts away
+  unwrapInBasin(box) {
+    this.s.step = 'melting';
+    this.forceRelease(box); this.ungrab(box); this.unfloat(box); this.setMarkers([]);
+    const water = this.basin.userData.placeholder.userData.water, wc = wp(water);
+    this.tweenTo(box, wc.clone().add(V(0, 0.01, 0)), new THREE.Quaternion(), 0.4, () => this.later(0.35, () => this.tearOpen(box, wc)));
+    this.setHint('포장을 여는 중…', '');
+  }
+  tearOpen(box, wc) {
+    this.sfx('wrap'); this.tone(900, 0.25, 'sawtooth', 0.03, 0.3);
+    const c = wp(box, V(0, 0.045, 0));
+    box.visible = false;
+    // the paper tears into pieces that flap off the box and fall around the basin
+    const tex = this.wrapTex, pm = new THREE.MeshStandardMaterial({ map: tex, color: tex ? 0xffffff : 0xc8333a, roughness: 0.8, side: THREE.DoubleSide });
+    for (let i = 0; i < 22; i++) {
+      const s = 0.03 + Math.random() * 0.035, g = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(0, 0), new THREE.Vector2(s, Math.random() * s * 0.4), new THREE.Vector2(s * (0.6 + Math.random() * 0.5), s), new THREE.Vector2(-s * 0.2, s * 0.8)]));
+      const m = new THREE.Mesh(g, i % 5 === 0 ? mat('#bfe6ff', { metalness: 0.3, roughness: 0.4 }) : pm);
+      m.position.copy(c).add(V((Math.random() - 0.5) * 0.08, (Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.08)); m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+      this.scene.add(m); this.conv.clip(m);
+      const dir = m.position.clone().sub(c).setY(0).normalize(), v = dir.multiplyScalar(0.35 + Math.random() * 0.4).setY(0.5 + Math.random() * 0.5), spin = V(Math.random() * 8, Math.random() * 8, Math.random() * 8);
+      let life = 0;
+      this.tween(1.6, k => {
+        const dt = 1 / 60; life += dt; v.y -= 1.6 * dt;
+        if (m.position.y > DESK_Y + 0.004 || v.y > 0) { m.position.addScaledVector(v, dt); m.rotation.x += spin.x * dt; m.rotation.y += spin.y * dt; m.rotation.z += spin.z * dt; }
+        if (k > 0.7) m.scale.setScalar(Math.max(0.01, (1 - k) / 0.3));
+      }, () => { m.removeFromParent(); g.dispose(); });
+    }
+    this.fx.emit(c, { color: '#fff3b0', count: 40, speed: 0.5, life: 0.9 });
+    // the bath bomb inside drops into the water
+    const r = RECIPES[this.recvId];
+    const bomb = this.recvBomb = this.make('bathbomb_' + r.shape, () => PH.bathbomb(r.shape, r.powder));
+    bomb.position.copy(this.group.worldToLocal(c.clone())); bomb.scale.setScalar(1.3); this.group.add(bomb);
+    const surf = wc.clone().add(V(0, -0.012, 0));
+    this.tween(0.5, k => bomb.position.copy(this.group.worldToLocal(c.clone().lerp(surf, k * k))), () => { this.sfx('splash'); this.tone(300, 0.3, 'sine', 0.08, 0.5);
+      this.fx.emit(wc, { color: '#d8f3ff', count: 40, speed: 0.35, gravity: 1.2, life: 0.7, dir: V(0, 1, 0) }); this.dissolve(bomb, wc, r); });
+    this.setHint(`${r.name}`, '배쓰밤이 거품을 내며 물에 녹고 있어요…');
+  }
+  dissolve(bomb, wc, r) {
+    const water = this.basin.userData.placeholder.userData.water, wm = water.material;
+    const c0 = wm.color.clone(), e0 = wm.emissive.clone(), tint = new THREE.Color(r.powder);
+    // foam: a bubbly disc that spreads over the water from the bath bomb
+    const ft = foamTexture();
+    const foam = this.foam = new THREE.Mesh(new THREE.CircleGeometry(0.19, 48).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({ map: ft, color: new THREE.Color('#ffffff').lerp(tint, 0.25), emissive: new THREE.Color('#ffffff').lerp(tint, 0.3).multiplyScalar(0.55), emissiveMap: ft,
+        transparent: true, opacity: 0, roughness: 0.9, depthWrite: false }));
+    foam.position.copy(water.position).add(V(0, 0.003, 0)); water.parent.add(foam); foam.scale.setScalar(0.08); this.conv.clip(foam);
+    const s0 = bomb.scale.x, DUR = 9;
+    let fizz = 0;
+    this.tween(DUR, k => {
+      const e = ease.inOut(k);
+      bomb.scale.setScalar(Math.max(0.001, s0 * (1 - Math.pow(k, 0.8))));
+      bomb.rotation.y += 0.025; bomb.position.y += Math.sin(k * 40) * 0.0004;
+      foam.scale.setScalar(0.08 + 0.92 * Math.min(1, k * 1.6)); foam.material.opacity = Math.min(0.9, k * 3) * (k > 0.85 ? 1 - (k - 0.85) * 2 : 1);
+      foam.rotation.y += 0.004;
+      wm.color.copy(c0).lerp(tint, e * 0.7); wm.emissive.copy(e0).lerp(tint.clone().multiplyScalar(0.5), e * 0.7);
+      if ((fizz += 1) % 2 === 0 && k < 0.95) {
+        const b = wp(bomb), a = Math.random() * 6.28, rr = Math.random() * 0.05 * (1 - k * 0.5);
+        this.fx.emit(b.add(V(Math.cos(a) * rr, 0.01, Math.sin(a) * rr)), { color: Math.random() < 0.6 ? '#ffffff' : r.powder, count: 4, speed: 0.12, gravity: -0.25, life: 0.9, dir: V(0, 1, 0), spread: 0.6 });
+        // bubbles popping up all over the spreading foam
+        const fr = 0.19 * foam.scale.x * Math.sqrt(Math.random()), fa = Math.random() * 6.28;
+        this.fx.emit(wc.clone().add(V(Math.cos(fa) * fr, 0.005, Math.sin(fa) * fr)), { color: '#ffffff', count: 1, speed: 0.05, gravity: -0.1, life: 0.6, dir: V(0, 1, 0), spread: 0.3 });
+      }
+      if (fizz % 9 === 0) this.tone(1800 + Math.random() * 1600, 0.03, 'sine', 0.012);
+    }, () => { bomb.visible = false; this.later(0.6, () => this.showEnd()); });
+  }
+
+  // ================================================================ ending: the cards, then Nicolas says goodbye and leaves through the door
+  showEnd() {
     this.s.step = 'end';
-    const r = RECIPES[this.recvId], box = this.recvBox; this.unfollow(box);
-    const c = wp(box, V(0, 0.06, 0));
-    this.fx.emit(c, { color: '#fff3b0', count: 80, speed: 0.6, life: 1.2 });
-    const s0 = box.scale.clone(); this.tween(0.5, k => box.scale.copy(s0).multiplyScalar(Math.max(0.01, 1 - k)), () => box.removeFromParent());
-    const bomb = this.make('bathbomb_' + r.shape, () => PH.bathbomb(r.shape, r.powder));
-    bomb.position.copy(this.group.worldToLocal(c.clone().add(V(0, -0.04, 0)))); bomb.scale.setScalar(0.01); this.group.add(bomb);
-    this.tween(0.7, k => bomb.scale.setScalar(Math.max(0.01, ease.back(k) * 1.6)));
-    this.float(bomb, c.clone().add(V(0, -0.02, 0)));
+    const r = RECIPES[this.recvId];
     // the other santa's letter (a little drawing) and the end card
-    const vf = this.viewFrame();   // both cards square to the view, side by side
-    const letter = new Panel({ w: 0.26, h: 0.19, px: 760, transparent: false, name: 'ReceivedLetter', draw: (g, P) => {
+    // both cards side by side at eye height in front of the player (turned with the view, but upright: the player is looking down
+    // at the basin when the cards appear, and cards square to that view would sink into the table)
+    const vf = this.viewFrame(), yaw = new THREE.Euler().setFromQuaternion(vf.q, 'YXZ').y;
+    vf.q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)); vf.f = V(0, 0, -1).applyQuaternion(vf.q); vf.u = V(0, 1, 0); vf.r = V(1, 0, 0).applyQuaternion(vf.q);
+    const letter = this.recvLetter = new Panel({ w: 0.26, h: 0.19, px: 760, transparent: false, name: 'ReceivedLetter', draw: (g, P) => {
       if (!P.bg) { g.fillStyle = '#fbf5e8'; g.fillRect(0, 0, P.W, P.H); }
       g.lineCap = 'round'; g.lineWidth = 8;
       g.strokeStyle = '#c0392b'; g.beginPath(); g.arc(P.W * 0.3, P.H * 0.45, 70, 0, Math.PI * 2); g.stroke();
@@ -1543,9 +1734,45 @@ export class Flow {
       P.text('From. 이름 모를 산타', P.W / 2, 290, { size: 32, color: INK.sub, align: 'center' });
       P.button('restart', P.W / 2 - 230, P.H - 150, 460, 100, '처음부터 다시하기', { size: 40, color: '#8a6f5e' });
     } });
-    const e = this.endPanel.mesh; e.position.copy(vf.head).addScaledVector(vf.f, 0.75).addScaledVector(vf.r, 0.2).addScaledVector(vf.u, 0.06); e.quaternion.copy(vf.q); e.visible = false; this.scene.add(e);
+    const e = this.endPanel.mesh; e.position.copy(vf.head).addScaledVector(vf.f, 0.75).addScaledVector(vf.r, 0.2).addScaledVector(vf.u, 0.06); e.quaternion.copy(vf.q); this.scene.add(e);
     this.panels.push(this.endPanel); this.garden?.blockers.push(e);
-    this.later(1.4, () => { e.visible = true; this.setHint('메리 크리스마스!', `이름 모를 산타가 '${r.emotion}'${josa(r.emotion, '을', '를')} 담아 보낸 ${r.name}${josa(r.name, '과', '와')} 그림 편지예요.`, '#ffe17a'); });
+    this.setHint('메리 크리스마스!', `이름 모를 산타가 '${r.emotion}'${josa(r.emotion, '을', '를')} 담아 보낸 ${r.name}${josa(r.name, '과', '와')} 그림 편지예요.`, '#ffe17a');
+    this.later(END_WAIT, () => this.farewell());
+  }
+  farewell() {
+    if (this.s.step !== 'end') return;
+    this.s.step = 'farewell';
+    const S = this.santa;
+    if (!S) return this.fadeOut();
+    S.turnTo(this.headPos(), 0.6);
+    S.wave(true);
+    this.santaSay('잘 있어요! 이제 선물을 나눠주러 가야 해요. 메리 크리스마스!', 5);
+    this.setHint('', '');
+    const P = this.santaPath;
+    this.later(5.2, () => {
+      S.wave(false);
+      this.santaWalking = true;
+      S.walkTo(P.via[1], { speed: 0.6 }).then(() => {
+        this.creak();
+        const d = this.door;
+        if (d) { const q0 = this.doorQ0, q1 = q0.clone().multiply(new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), this.doorOpen));
+          this.tween(1.1, k => d.quaternion.slerpQuaternions(q0, q1, ease.inOut(k))); }
+        return new Promise(res => this.later(0.9, res));
+      }).then(() => S.walkTo(P.start, { via: P.via[0], speed: 0.6 }))
+        .then(() => { S.object.visible = false; this.santaWalking = false; this.closeDoor(); this.later(1.4, () => this.fadeOut()); });
+    });
+  }
+  // fade to black (PC: a full-screen layer; VR: a black shell around the head)
+  fadeOut(dur = 3) {
+    this.s.step = 'fin';
+    this.setHint('', ''); this.setMarkers([]);
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;z-index:9999;transition:opacity ' + dur + 's ease';
+    document.body.appendChild(el); requestAnimationFrame(() => requestAnimationFrame(() => el.style.opacity = '1'));
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(0.25, 16, 12), new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
+    shell.renderOrder = 9999; this.camera.add(shell);
+    this.tween(dur, k => shell.material.opacity = k);
+    this.later(dur, () => { if (this.bgm) this.tween(1.5, k => this.bgm.volume = 0.5 * (1 - k)); try { window.jukebox?.stop?.(); } catch (e) {} });
   }
 
   // ---------------------------------------------------------------- grab / release rules
@@ -1582,7 +1809,9 @@ export class Flow {
       return this.decorDone();
     }
     if (o === this.bomb && st === 'wrap' && this.over(o, this.zones.wrap)) return this.wrapPlaced();
-    if ((o === this.gift || o === this.env) && st === 'send' && this.over(o, this.zones.basin)) return this.sink(o);
+    if ((o === this.gift || o === this.env) && st === 'give' && this.zones.santa && this.over(o, this.zones.santa)) return this.giveToSanta(o);
+    if (o === this.recvBox && st === 'basin' && this.over(o, this.zones.basin)) return this.unwrapInBasin(o);
+    if (o === this.recvBox && (st === 'basin' || st === 'toBasin')) { this.tweenTo(o, L.hold.clone(), new THREE.Quaternion(), 0.5, () => this.float(o, L.hold)); return; }
     if (o === this.lid && st === 'open') return this.openLid();
     return this.homeOrFloat(o);
   }
@@ -1616,12 +1845,13 @@ export class Flow {
 
   // ---------------------------------------------------------------- per frame
   update(dt, t) {
-    dt = Math.min(dt, 0.05);
+    dt = Math.min(dt, 0.05) * (window.__timeScale || 1);   // __timeScale: test hook (fast-forward the flow)
     // timers & tweens
     for (const x of [...this.timers]) { x.t -= dt; if (x.t <= 0) { this.timers.splice(this.timers.indexOf(x), 1); x.fn(); } }
     for (const x of [...this.tweens]) { x.t += dt; const k = Math.min(1, x.t / x.dur); x.upd(k); if (k >= 1) { this.tweens.splice(this.tweens.indexOf(x), 1); x.done?.(); } }
-    this.recvFlight?.(dt);
+    this.conv?.update(dt);
     this.updateSanta(dt);
+    this.updateBubble(dt);
     // follow the view
     const head = this.headPos();
     // UI that follows the view (letter, recipe book): straight in front of the eyes, square to the view, no roll
