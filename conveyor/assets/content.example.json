@@ -1,0 +1,15 @@
+{
+  "opening": {
+    "name": "니콜라스",
+    "lines": ["안녕하신가, 당신은 이번에 새로 온 신입이지?", "나는 산타마을의 촌장 니콜라스일세."]
+  },
+  "ingredients": {
+    "fairySugar": { "name": "요정설탕", "real": "베이킹 소다", "color": "#f4f1ff" }
+  },
+  "emotions": [
+    { "id": "fresh", "label": "상쾌함 · 활력", "sub": "기운 나는 하루를 선물하고 싶어요" }
+  ],
+  "recipes": {
+    "christmasTree": { "name": "크리스마스 트리", "powderDesc": "초록빛의 청량한 마법 가루" }
+  }
+}
