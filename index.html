@@ -73,7 +73,7 @@
       <button id="shadows" aria-pressed="false">그림자</button>
       <button id="music" aria-pressed="true">음악</button>
     </div>
-    <div style="margin-top:7px;font-size:11px;color:#9c9387"><b style="color:#ffd9a8">작업대 앞 제자리에서 체험해요. 시작하면 벽난로에 불이 붙고 편지가 날아와요. 안내(화면 위)를 따라가요.</b>
+    <div style="margin-top:7px;font-size:11px;color:#9c9387"><b style="color:#ffd9a8">작업대 앞 제자리에서 체험해요. 시작하면 산타마을 촌장 니콜라스가 문을 열고 들어와 인사해요. 안내(화면 위)를 따라가요.</b>
       <br>PC: 오른쪽 버튼 드래그 = 둘러보기 · 왼쪽 클릭(누른 채 끌기) = 집기/누르기 · Space = 손 동작 · R 누른 채 = 기울이기 · 휠 = 거리
       <br>퀘스트3 손: 엄지+검지 집기 / 주먹 = 잡기 · 손가락 끝 = 책·버튼 누르기 · 멀리 있는 것은 손으로 가리키면 빛줄기가 닿고, 그때 집으면 손으로 날아오거나 서랍이 열려요
       <br>퀘스트3 컨트롤러: 트리거 = 집기(멀리 가리키기 포함) · 그립 = 주먹 · 오른쪽 스틱 = 회전</div>
@@ -109,6 +109,7 @@
 <script src="modules/nametag.js"></script>
 <script src="modules/kitchen.data.js"></script>
 <script src="modules/kitchen.js"></script>
+<script src="modules/santa.js"></script>
 <!-- room: room.glb.js = room.glb with KTX2 textures (rebuild with "room.glb 변경후_실행.bat"); room.glb is the Blender source -->
 <script src="room.glb.js" onerror="this.remove()"></script>
 <script src="trees.glb.js" onerror="this.remove()"></script>
@@ -669,7 +670,7 @@ function onRoom(gltf) {
   const fp = logBox.getCenter(new THREE.Vector3()); fp.y = logBox.max.y - 0.02;
   const fireScale = THREE.MathUtils.clamp(Math.max(logBox.getSize(new THREE.Vector3()).x, logBox.getSize(new THREE.Vector3()).z) / 0.5, 0.5, 1.5);
   console.log('fire at', fp.toArray(), 'logs', logBox.min.toArray(), logBox.max.toArray());
-  SPACE_LAYOUT.chimney = fp.clone().add(new THREE.Vector3(0.03, 0.32, 0));   // the letter flies out of / gifts come back through the fireplace
+  SPACE_LAYOUT.chimney = fp.clone().add(new THREE.Vector3(0.03, 0.32, 0));   // gifts leave and come back through the fireplace
   fireFx.light = new THREE.PointLight(0xff7a2a, 1.6, 6, 2);
   fireFx.light.position.copy(fp).y += 0.2;
   scene.add(fireFx.light);
@@ -1151,9 +1152,10 @@ function onRoom(gltf) {
   buildColliders(root);
   applyStand();    // stand on the real floor now that it exists
   document.getElementById('loading').classList.add('done');
-  // the experience: letter at the fireplace -> recipe book -> make a bath bomb -> wrap -> letter -> send
+  // the experience: Nicolas comes in through the door and greets you -> recipe book -> make a bath bomb -> wrap -> letter -> send
   import('./modules/flow.js').then(({ startFlow }) => {
     flow = startFlow({ scene, root, camera, renderer, rig, garden, canvas: renderer.domElement, toast, P, cast, drawerSet, layout: SPACE_LAYOUT,
+      door: root.getObjectByName('DoorLeaf'), view: { get: () => [yaw, pitch], set: (y, p) => { yaw = y; pitch = p; }, home: [STAND.yaw, STAND.pitch] },
       hintEl: document.getElementById('hint'), fire: { setLevel: (k) => fireFx.setLevel?.(k) } });
     window.__flow = flow;
   }).catch(e => { console.error(e); showErr('flow: ' + e.message); });

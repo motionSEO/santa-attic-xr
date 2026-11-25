@@ -1,6 +1,6 @@
 // flow.js — the "Dear Stranger, from Santa" experience, played inside the attic.
 //
-// 인트로(벽난로에서 날아오는 편지) → 01 마음 고르기(레시피북) → 02 레시피 확인 → 03 공통 베이스 →
+// 오프닝(니콜라스가 문을 열고 들어와 손 흔들며 인사) → 01 마음 고르기(레시피북) → 02 레시피 확인 → 03 공통 베이스 →
 // 03~04 자연재료 수집·손질 → 05 빻기 → 06 틀에 붓기·누르기·열기 → 07 장식 → 08 포장 →
 // 09 그림 편지 → 마법 수반 발송 → 다른 산타의 선물 받기
 //
@@ -12,10 +12,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 // ------------------------------------------------------------------ data (from the original game)
-export const INTRO = {
-  title: '올해 크리스마스, 당신은 누구의 산타가 될까요?',
-  body: ['어느 날, 산타가 러쉬를 찾아왔어요.', '"올해는 조금 특별한 크리스마스를 만들어 보는 게 어떨까?"',
-    '모든 사람이 하루 동안 서로의 산타가 되는 날!', '직접 만든 배쓰밤과 편지를 이름 모를 누군가에게 보내고,', '또 다른 산타의 선물을 받아보세요.']
+// opening: Santa (Nicolas, the village chief) opens the door, walks in, waves and says these lines
+export const OPENING = {
+  name: '니콜라스',
+  lines: ['안녕하신가, 당신은 이번에 새로 온 신입이지?', '나는 산타마을의 촌장 니콜라스일세.',
+    '반갑군. 오늘 처음으로 누군가에게 줄 선물을 만든다지?', '내가 하나하나 알려줄 테니, 차근차근 따라오면 된다네.']
 };
 export const ING = {
   fairySugar: { name: '요정설탕', real: '베이킹 소다', location: 'shelf', action: 'pour', color: '#f4f1ff', base: true },
@@ -82,6 +83,8 @@ const L = {
   drawerOut: new THREE.Vector3(0.30, DESK_Y + 0.06, -0.02),   // drawer items fly over and land here, in front of the player
   wrap:    new THREE.Vector3(0.62, DESK_Y, 0.02),
   letter:  new THREE.Vector3(0.58, DESK_Y, 0.06),
+  santa:   new THREE.Vector3(-0.45, 0, -0.55),               // where Nicolas stops to greet you (across the desk, left of the door)
+  santaAside: new THREE.Vector3(-0.72, 0, -1.25),            // where he stands and watches once the recipe book is open
   basin:   new THREE.Vector3(1.38, 0, 0.30),
   chimney: new THREE.Vector3(-0.42, 0.45, 0.50)              // index.html sets it from the fireplace logs
 };
@@ -351,17 +354,20 @@ const PH = {
     water.position.y = 0.835; water.name = 'BasinWater'; g.add(water);
     g.userData.water = water; return g;
   },
-  parchment() {
-    const p = new Panel({ w: 0.4, h: 0.5, px: 800, name: 'Parchment', draw: (g, P) => {
-      if (!P.bg) { g.fillStyle = '#ead6a8'; P.round(20, 20, P.W - 40, P.H - 40, 30); g.fill(); g.lineWidth = 5; g.strokeStyle = 'rgba(110,70,30,.6)'; g.stroke(); }
-      P.text('✦', P.W / 2, 70, { size: 40, color: '#8a4a22', align: 'center' });
-      let y = P.text(INTRO.title, P.W / 2, 140, { size: 40, weight: 700, color: '#4a2a14', align: 'center', maxW: P.W - 160, lineH: 54 });
-      y += 40; for (const b of INTRO.body) y = P.text(b, P.W / 2, y, { size: 28, color: '#5a3a20', align: 'center', maxW: P.W - 150, lineH: 42 });
-      P.text('— 산타로부터', P.W - 110, P.H - 120, { size: 28, color: '#6a4220', align: 'right' });
-      P.text('(손가락으로 누르거나 클릭하면 넘어가요)', P.W / 2, P.H - 70, { size: 20, color: '#8a6a4a', align: 'center' });
+  // Nicolas's speech bubble (floats above him, faces the player; works in VR). Clicking anywhere on it = next line.
+  talkPanel() {
+    return new Panel({ w: 0.9, h: 0.27, px: 1024, name: 'SantaTalk', draw: (g, P) => {
+      const st = P.state;
+      if (!P.bg) {
+        g.fillStyle = 'rgba(28,18,10,0.92)'; g.strokeStyle = '#d9b46a'; g.lineWidth = 5;
+        P.round(8, 44, P.W - 16, P.H - 52, 30); g.fill(); g.stroke();
+      }
+      g.fillStyle = INK.red; P.round(40, 10, 220, 64, 20); g.fill();
+      P.text(st.name || '', 150, 22, { size: 34, weight: 700, color: '#fff4dc', align: 'center' });
+      P.text(st.text || '', 50, 104, { size: 42, color: '#f6e7c6', maxW: P.W - 100, lineH: 58 });
+      if (st.next) P.text(st.last ? '▼ 레시피북 펼치기' : '▼ 다음', P.W - 40, P.H - 52, { size: 28, color: '#d9b46a', align: 'right' });
       P.buttons.push({ id: 'next', x: 0, y: 0, w: P.W, h: P.H });
     } });
-    return p;
   }
 };
 
@@ -416,10 +422,10 @@ export class Flow {
       for (const o of this.made || []) this.applyAsset(o);
     } catch (e) { if (this.manifest) console.warn('manifest', e); /* no manifest yet: placeholders stay */ }
   }
-  async loadContent(file) {      // texts: ingredient names, emotions, recipes, intro letter (merged by id)
+  async loadContent(file) {      // texts: ingredient names, emotions, recipes, Nicolas's opening lines (merged by id)
     try {
       const c = await (await fetch(file, { cache: 'no-cache' })).json();
-      if (c.intro) Object.assign(INTRO, c.intro);
+      if (c.opening) Object.assign(OPENING, c.opening);
       for (const [id, v] of Object.entries(c.ingredients || {})) ING[id] = Object.assign(ING[id] || {}, v);
       for (const [id, v] of Object.entries(c.recipes || {})) RECIPES[id] = Object.assign(RECIPES[id] || {}, v);
       for (const e of c.emotions || []) { const o = EMOTIONS.find(x => x.id === e.id); o ? Object.assign(o, e) : EMOTIONS.push(e); }
@@ -636,12 +642,14 @@ export class Flow {
       if (e.code === 'Space') { e.preventDefault(); this.action(); }
       if (e.code === 'KeyR') this.tiltKey = true;
       if (e.code === 'Enter' && this.s.step === 'dark') this.begin();
+      else if (e.code === 'Enter' && this.s.step === 'intro') this.advanceTalk();
     });
     addEventListener('keyup', (e) => { if (e.code === 'KeyR') this.tiltKey = false; });
     c.addEventListener('pointerdown', (e) => {
       if (this.renderer.xr.isPresenting) return;
-      if (this.s.step === 'dark') { this.begin(); }
+      if (this.s.step === 'dark') { this.begin(); return; }
       if (e.button !== 0) return;
+      if (this.s.step === 'intro') { this.advanceTalk(); return; }      // opening: a click anywhere = next line
       const r = c.getBoundingClientRect(), ndc = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
       const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, this.camera); ray.far = 3.5;
       this.onClick(ray);
@@ -651,6 +659,8 @@ export class Flow {
     });
     c.addEventListener('wheel', (e) => { if (this.mouseObj) this.mouseDepth = THREE.MathUtils.clamp(this.mouseDepth - e.deltaY * 0.0006, 0.25, 1.0); }, { passive: true });
     this.renderer.xr.addEventListener('sessionstart', () => { if (this.s.step === 'dark') setTimeout(() => this.begin(), 600); });
+    // VR: trigger (controller) or pinch (hand) anywhere = Nicolas's next line
+    for (let i = 0; i < 2; i++) this.renderer.xr.getController(i).addEventListener('select', () => { if (this.s.step === 'intro') this.advanceTalk(); });
   }
   clickables() {
     const list = [];
@@ -732,7 +742,7 @@ export class Flow {
   // PC: Space = the hand action for whatever you hold (cut, squeeze, break, pound, press)
   action() {
     const o = this.mouseObj, st = this.s.step;
-    if (st === 'intro' && this.parchment) return this.closeParchment();
+    if (st === 'intro') return this.advanceTalk();
     if (o === this.knife) return this.tryCut();
     if (o === this.pestle) return this.pound();
     if (o?.userData.breakable) return this.breakItem(o);
@@ -826,41 +836,151 @@ export class Flow {
     }
   }
 
-  // ================================================================ 00 intro: fire, parchment from the fireplace
+  // ================================================================ 00 opening: Nicolas opens the door, walks in, waves and talks
+  // Santa is modules/santa.js (window.createSanta). The door is the room's 'DoorLeaf' node (index.html passes it as ctx.door).
+  setupSanta() {
+    if (this.santa || !window.createSanta) return;
+    const S = this.santa = window.createSanta(THREE, { scale: 1.2 });       // ~1.56 m with the hat: fits under the 1.74 m door
+    S.object.visible = false; this.scene.add(S.object);
+    const floorY = (x, z) => {                                               // floor height under a point (room + snow outside)
+      const r = new THREE.Raycaster(V(x, 1.5, z), V(0, -1, 0), 0, 2.5);
+      const h = r.intersectObject(this.root || this.scene, true).find(h => h.object.visible && !h.object.isPoints);
+      return h ? h.point.y : 0;
+    };
+    // door frame from the closed leaf: hinge = leaf origin, the thin axis of its box is the wall normal, inside = toward the player
+    const stand = L.stand.clone(), door = this.door;
+    let hinge, centre, n, openAngle = 1.45;
+    if (door) {
+      door.updateWorldMatrix(true, true);
+      const b = new THREE.Box3().setFromObject(door), size = b.getSize(V());
+      hinge = wp(door); centre = b.getCenter(V()); centre.y = 0;
+      n = size.x < size.z ? V(Math.sign(stand.x - centre.x) || 1, 0, 0) : V(0, 0, Math.sign(stand.z - centre.z) || 1);
+      const free = centre.clone().sub(V(hinge.x, 0, hinge.z));               // hinge -> free edge
+      const turned = free.clone().applyAxisAngle(V(0, 1, 0), openAngle);
+      if (turned.dot(n) < 0) openAngle = -openAngle;                          // swing into the room
+      this.doorQ0 = door.quaternion.clone();
+    } else { centre = V(-1.17, 0, -1.47); n = V(1, 0, 0); }
+    this.doorOpen = openAngle;
+    const at = (v) => v.setY(floorY(v.x, v.z));
+    const out = at(centre.clone().addScaledVector(n, -0.9));
+    this.santaPath = {
+      start: out,
+      via: [at(centre.clone().addScaledVector(n, -0.25)), at(centre.clone().addScaledVector(n, 0.45))],
+      stop: at(L.santa.clone()),
+      doorLook: centre.clone().setY(1.25)
+    };
+    S.object.position.copy(out); S.object.rotation.y = Math.atan2(n.x, n.z);
+  }
+  // sounds (a manifest file wins; otherwise a tiny synthesized one)
+  tone(f, d, type = 'sine', v = 0.15, glide = 0) {
+    try {
+      const ac = this.actx ||= new AudioContext(); if (ac.state === 'suspended') ac.resume();
+      const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+      o.type = type; o.frequency.setValueAtTime(f, t); if (glide) o.frequency.exponentialRampToValueAtTime(f * glide, t + d);
+      g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + d);
+      o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d);
+    } catch (e) { /* no audio */ }
+  }
+  knock() { if (this.sfx('knock')) return; this.tone(140, 0.12, 'triangle', 0.4); setTimeout(() => this.tone(140, 0.12, 'triangle', 0.4), 180); setTimeout(() => this.tone(150, 0.12, 'triangle', 0.4), 520); }
+  creak() { if (this.sfx('door')) return; this.tone(180, 0.9, 'sawtooth', 0.025, 1.6); }
+
   begin() {
     if (this.s.step !== 'dark') return;
     this.s.step = 'intro'; this.setHint('', '');
+    this.setupSanta();
     if (this.renderer.xr.isPresenting) this.toast('손이 닿지 않는 것은 손으로 가리킨 뒤 집으면 돼요');
     if (!this.bgm) this.bgm = this.sfx('bgm', { loop: true, volume: 0.5 });
     this.later(1.0, () => this.sfx('fire'));
     this.fire?.setLevel(0.12);
     this.later(1.0, () => { this.tween(1.6, k => this.fire?.setLevel(0.12 + 0.88 * ease.out(k))); this.fx.emit(L.chimney, { color: '#ffb35a', count: 50, speed: 0.6, gravity: -0.4, life: 1.0 }); });
-    this.later(2.6, () => this.flyParchment());
+    const P = this.santaPath;
+    if (!this.santa || !P) { this.later(1.0, () => this.showEmotionBook()); return; }      // no santa.js: straight to the book
+    this.camLook = P.doorLook;                                                // PC: the view turns to the door
+    this.later(1.4, () => { this.knock(); this.setHint('똑똑, 누가 왔나 봐요', this.renderer.xr.isPresenting ? '오른쪽 앞의 문을 봐주세요.' : ''); });
+    this.later(2.6, () => this.openDoor());
   }
-  flyParchment() {
-    const p = this.parchment = PH.parchment(); const m = p.mesh; this.sfx('letter');
-    m.position.copy(L.chimney); m.scale.setScalar(0.2); this.scene.add(m); this.panels.push(p);
-    this.fx.emit(L.chimney, { color: '#ffb35a', count: 60, speed: 0.7, gravity: -0.4, life: 1.2 });
-    const a = L.chimney.clone(); let t = 0; const dur = 2.6;
-    this.parchFlight = (dt) => {
-      t += dt; const k = Math.min(1, t / dur), e = ease.inOut(k);
-      const d = this.viewFront(0.6), mid = a.clone().lerp(d, 0.5).add(V(0, 0.6, 0));
-      const p1 = a.clone().lerp(mid, e), p2 = mid.clone().lerp(d, e);
-      m.position.copy(p1.lerp(p2, e)); m.scale.setScalar(0.2 + 0.8 * e);
-      m.lookAt(this.headPos()); m.rotateZ(Math.sin(t * 9) * 0.35 * (1 - k)); m.rotateX(Math.sin(t * 6) * 0.4 * (1 - k));
-      if (Math.random() < 0.4) this.fx.emit(m.position, { color: '#ffcf8a', count: 1, speed: 0.05, gravity: 0.3, life: 0.6 });
-      if (k >= 1) { this.parchFlight = null; this.follow(m, { dist: 0.6, yOff: 0, speed: 6 }); this.later(12, () => this.closeParchment()); }
-    };
-    this.setHint('편지가 도착했어요', '벽난로에서 날아온 산타의 편지를 읽어보세요. 다 읽으면 편지를 누르세요 (PC: 클릭 또는 Space).');
+  openDoor() {
+    const S = this.santa, P = this.santaPath, d = this.door;
+    S.object.visible = true; this.creak();
+    if (d) { const q0 = this.doorQ0, q1 = q0.clone().multiply(new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), this.doorOpen));
+      this.tween(1.3, k => d.quaternion.slerpQuaternions(q0, q1, ease.inOut(k))); }
+    this.later(0.8, () => {
+      this.setHint('산타마을 촌장 니콜라스', '');
+      this.santaWalking = true;
+      S.walkTo(P.stop, { via: P.via, speed: 0.75 })
+        .then(() => { this.santaWalking = false; this.closeDoor(); return S.turnTo(this.headPos(), 0.7); })
+        .then(() => this.startTalk());
+    });
   }
-  closeParchment() {
-    const p = this.parchment; if (!p || this.s.step !== 'intro') return;
-    this.parchment = null; this.parchFlight = null; this.unfollow(p.mesh);
-    this.panels = this.panels.filter(x => x !== p);
-    const s0 = p.mesh.scale.clone();
-    this.tween(0.8, k => { p.mesh.scale.set(s0.x * (1 - k * 0.2), s0.y * Math.max(0.04, 1 - k), s0.z); p.mesh.material.opacity = 1 - k * k; p.mesh.material.transparent = true; }, () => p.mesh.removeFromParent());
-    this.fx.emit(wp(p.mesh), { color: '#ffe28a', count: 30, speed: 0.3, life: 0.8 });
-    this.later(0.7, () => this.showEmotionBook());
+  closeDoor() {
+    const d = this.door; if (!d) return;
+    const q0 = d.quaternion.clone(); this.tween(1.1, k => d.quaternion.slerpQuaternions(q0, this.doorQ0, ease.inOut(k)), () => this.tone(110, 0.15, 'triangle', 0.3));
+  }
+  startTalk() {
+    const S = this.santa;
+    const panel = PH.talkPanel();
+    panel.mesh.renderOrder = 10; panel.mesh.material.depthTest = false; this.scene.add(panel.mesh); this.panels.push(panel);
+    this.talk = { panel, i: 0, typed: 0, done: false, shown: -1 };
+    S.setExpression('happy'); S.wave(true);
+    this.setHint('니콜라스의 인사', this.renderer.xr.isPresenting ? '트리거를 당기거나 엄지와 검지로 집으면 다음 대사로 넘어가요.' : '클릭하거나 Space를 누르면 다음 대사로 넘어가요.');
+  }
+  advanceTalk() {
+    const T = this.talk; if (!T || this.s.step !== 'intro') return;
+    const now = performance.now(); if (now - (this.talkAt || 0) < 250) return; this.talkAt = now;   // one pinch can arrive as a click and a select
+    const line = OPENING.lines[T.i] || '';
+    if (!T.done) { T.typed = line.length; return; }                         // first press: finish typing the line
+    this.sfx('click');
+    T.i++; T.typed = 0; T.done = false; T.shown = -1;
+    if (T.i === 1) this.santa.wave(false);                                    // waves on the greeting only
+    if (T.i >= OPENING.lines.length) this.endTalk();
+  }
+  endTalk() {
+    const T = this.talk; this.talk = null;
+    this.panels = this.panels.filter(p => p !== T.panel);
+    const m = T.panel.mesh, s0 = m.scale.clone();
+    this.tween(0.35, k => m.scale.set(s0.x, s0.y * Math.max(0.05, 1 - k), s0.z), () => m.removeFromParent());
+    this.santa.talk(false); this.santa.wave(false); this.santa.setExpression('happy');
+    this.camLook = null;
+    if (this.view && !this.renderer.xr.isPresenting) {                       // PC: back to the work desk view
+      const [y0, p0] = this.view.get(), [y1, p1] = this.view.home, dy = Math.atan2(Math.sin(y1 - y0), Math.cos(y1 - y0));
+      this.tween(1.0, k => { const e = ease.inOut(k); this.view.set(y0 + dy * e, p0 + (p1 - p0) * e); });
+    }
+    this.later(0.6, () => this.showEmotionBook());
+    // then he steps aside (toward the door) so the fireplace and the desk stay clear, and keeps watching you work
+    this.later(1.4, () => { this.santaWalking = true;
+      this.santa.walkTo(L.santaAside, { speed: 0.6 }).then(() => { this.santaWalking = false; return this.santa.turnTo(this.headPos(), 0.6); }); });
+  }
+  updateSanta(dt) {
+    const S = this.santa; if (!S) return;
+    const head = this.headPos(), T = this.talk;
+    // PC: the view follows the opening (door, then Nicolas); in VR the player turns their own head
+    if (this.camLook && this.view && !this.renderer.xr.isPresenting) {
+      const o = S.object.position, look = !S.object.visible ? this.camLook : o.clone().setY(o.y + (T ? 1.5 : this.santaWalking ? 1.2 : 1.3));
+      const c = wp(this.camera), d = look.sub(c);
+      const yaw = Math.atan2(-d.x, -d.z), pitch = THREE.MathUtils.clamp(Math.atan2(d.y, Math.hypot(d.x, d.z)), -0.6, 0.4);
+      const [y0, p0] = this.view.get(), a = 1 - Math.exp(-dt * 2.5);
+      this.view.set(y0 + Math.atan2(Math.sin(yaw - y0), Math.cos(yaw - y0)) * a, p0 + (pitch - p0) * a);
+    }
+    if (!S.object.visible) return;
+    if (T) {
+      const line = OPENING.lines[T.i] || '';
+      if (!T.done) {
+        const prev = Math.floor(T.typed);
+        T.typed = Math.min(line.length, T.typed + dt * 20);
+        const ch = Math.floor(T.typed);
+        if (ch !== prev && line[prev] !== ' ') this.tone(520 + Math.random() * 120, 0.04, 'square', 0.025);
+        if (T.typed >= line.length) T.done = true;
+      }
+      const shown = Math.floor(T.typed) + (T.done ? 1000 : 0);
+      if (shown !== T.shown) { T.shown = shown; T.panel.set({ name: OPENING.name, text: line.slice(0, Math.floor(T.typed)), next: T.done, last: T.i === OPENING.lines.length - 1 }); }
+      S.talk(!T.done);
+      const m = T.panel.mesh, p = S.object.position;
+      const toHead = V(head.x - p.x, 0, head.z - p.z).normalize();
+      m.position.set(p.x, p.y + 1.92, p.z).addScaledVector(toHead, 0.25);
+      m.lookAt(head);
+    }
+    // head follows the player once he is inside (during the walk he looks where he goes)
+    S.update(dt, this.santaWalking ? null : head);
   }
 
   // ================================================================ 01–02 recipe book
@@ -880,7 +1000,7 @@ export class Flow {
       if (id === 'begin' && this.s.step === 'recipe') return this.beginGather();
       if (id === 'back' && this.s.step === 'recipe') { this.s.step = 'emotion'; this.pages.set({ view: 'choose', selected: null }); this.setHint('01 마음 고르기', '전하고 싶은 마음을 다시 골라주세요.'); }
     }
-    if (panel === this.parchment && id === 'next') return this.closeParchment();
+    if (panel === this.talk?.panel && id === 'next') return this.advanceTalk();
     if (panel && panel === this.letterBtns) { if (id === 'clear') this.clearLetter(); if (id === 'done') this.finishLetter(); }
     if (panel && panel === this.endPanel && id === 'restart') location.reload();
   }
@@ -909,7 +1029,7 @@ export class Flow {
     if (!P.bg) { g.fillStyle = INK.paper; g.fillRect(0, 0, W, H); }
     const grad = g.createLinearGradient(half - 60, 0, half + 60, 0); grad.addColorStop(0, 'rgba(120,84,50,0)'); grad.addColorStop(0.5, 'rgba(120,84,50,.35)'); grad.addColorStop(1, 'rgba(120,84,50,0)');
     g.fillStyle = grad; g.fillRect(half - 60, 0, 120, H);
-    if (!st.view) { P.text('LUSH SANTA', half / 2, H / 2 - 60, { size: 56, weight: 700, color: INK.red, align: 'center' }); P.text('산타의 레시피북', half / 2, H / 2 + 10, { size: 44, align: 'center' }); P.text('편지를 다 읽으면 열려요', half + half / 2, H / 2 - 20, { size: 30, color: INK.sub, align: 'center' }); return; }
+    if (!st.view) { P.text('LUSH SANTA', half / 2, H / 2 - 60, { size: 56, weight: 700, color: INK.red, align: 'center' }); P.text('산타의 레시피북', half / 2, H / 2 + 10, { size: 44, align: 'center' }); P.text('니콜라스의 인사가 끝나면 열려요', half + half / 2, H / 2 - 20, { size: 30, color: INK.sub, align: 'center' }); return; }
     if (st.view === 'choose') {
       P.text('LUSH SANTA · 산타의 레시피북', half / 2, 40, { size: 26, weight: 700, color: INK.red, align: 'center' });
       P.text('누구에게 어떤 마음을', half / 2, 90, { size: 42, weight: 700, align: 'center' });
@@ -1462,7 +1582,8 @@ export class Flow {
     // timers & tweens
     for (const x of [...this.timers]) { x.t -= dt; if (x.t <= 0) { this.timers.splice(this.timers.indexOf(x), 1); x.fn(); } }
     for (const x of [...this.tweens]) { x.t += dt; const k = Math.min(1, x.t / x.dur); x.upd(k); if (k >= 1) { this.tweens.splice(this.tweens.indexOf(x), 1); x.done?.(); } }
-    this.parchFlight?.(dt); this.recvFlight?.(dt);
+    this.recvFlight?.(dt);
+    this.updateSanta(dt);
     // follow the view
     const head = this.headPos();
     // UI that follows the view (letter, recipe book): straight in front of the eyes, square to the view, no roll
