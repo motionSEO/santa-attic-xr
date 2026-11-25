@@ -18,7 +18,7 @@
 //   편지는 저장·전송하지 않는다. 필요하면 getImage() 로 PNG 를 직접 받아 쓰면 된다.
 import * as THREE from 'three';
 
-const W = 0.66, H = 0.46;               // 편지지 크기(m) — 큰 창처럼
+const W = 0.5, H = 0.35;                // 편지지 크기(m) — VR 테스트 후 조금 줄임 (0.66 x 0.46 → 0.5 x 0.35)
 // 종이 캔버스: 시야 70°가 넘는 큰 종이라 2048px 로 그려야 퀘스트에서 글자·획이 깨지지 않는다
 const S = 2;
 const CW = 1024 * S, CH = Math.round(CW * H / W);
@@ -654,7 +654,9 @@ export class HandLetter {
     frame.extractBasis(x, y, z);                       // x: 손목→검지 마디(앞), y: 새끼 쪽, z: 손바닥 또는 손등 쪽
     const grip = this.gripPoint(h, i);
     // z 가 손바닥 쪽인지: 꼬집은 점은 손바닥 쪽에 있다 (컨트롤러는 z 가 아래 = 손바닥 쪽)
-    const side = grip.clone().sub(h.knuckle).dot(z) < -0.004 ? -1 : 1;
+    // 손: 오른손이면 z 가 손바닥 쪽, 왼손이면 손등 쪽 (handedOf 로 알려 줌). 모르면 꼬집은 점이 있는 쪽. 컨트롤러는 z = 아래 = 손바닥 쪽
+    const hd = h.pad ? 'pad' : this.handedOf?.(i);
+    const side = hd === 'pad' || hd === 'right' ? 1 : hd === 'left' ? -1 : (grip.clone().sub(h.knuckle).dot(z) < -0.004 ? -1 : 1);
     const palm = z.clone().multiplyScalar(side);
     const tipDir = x.clone().multiplyScalar(0.55).addScaledVector(palm, 0.75).addScaledVector(y, -0.3).normalize();   // 앞·아래, 살짝 엄지 쪽
     const tip = grip.clone().addScaledVector(tipDir, GRIP_TO_TIP);
@@ -910,7 +912,7 @@ export function createHandLetter(o) {
     d.pinky.copy(d.knuckle).addScaledVector(_px, 0.05);
     d.index.copy(at).addScaledVector(_pz, -0.07);                 // 단추는 컨트롤러 앞끝으로 누른다
     d.thumb.copy(d.index).addScaledVector(_py, c.trigger ? 0 : 0.06);
-    d.curl = c.squeeze ? 1 : 0;
+    d.curl = c.squeeze ? 1 : 0; d.pad = true;
     return d;
   }
 
