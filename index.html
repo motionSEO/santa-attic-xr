@@ -977,11 +977,13 @@ function onRoom(gltf) {
       const plate = rootNode.getObjectByName('NameTag00' + i); if (!plate) continue;
       rootNode.updateMatrixWorld(true);
       const bb = new THREE.Box3().setFromObject(plate), c = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3());
+      // pose worked out now, in the plate's own space: the cabinet is moved onto the conveyor desk before the tag finishes loading,
+      // and the tag has to stay on its drawer front wherever the cabinet goes
+      const pq = plate.getWorldQuaternion(new THREE.Quaternion()), ps = plate.getWorldScale(new THREE.Vector3());
+      const tq = pq.invert().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI));   // faces the drawer front
+      const tp = plate.worldToLocal(c.clone().add(new THREE.Vector3(0, 0, -0.003 - sz.z / 2)));
       make({ text: TAG_TEXT[i - 1], width: Math.max(sz.x, sz.y) * 1.25, color: '#3b2412', curl: 0.0012 }).then(tag => {
-        const pq = plate.getWorldQuaternion(new THREE.Quaternion()), ps = plate.getWorldScale(new THREE.Vector3());
-        tag.quaternion.copy(pq.invert()).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI));   // faces -z, the player
-        tag.scale.set(1 / ps.x, 1 / ps.y, 1 / ps.z);
-        tag.position.copy(plate.worldToLocal(c.clone().add(new THREE.Vector3(0, 0, -0.003 - sz.z / 2))));
+        tag.quaternion.copy(tq); tag.scale.set(1 / ps.x, 1 / ps.y, 1 / ps.z); tag.position.copy(tp);
         plate.add(tag); plate.material = new THREE.MeshBasicMaterial({ visible: false });
       }).catch(e => console.error('nametag', e));
     }
