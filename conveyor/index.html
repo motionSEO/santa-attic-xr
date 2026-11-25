@@ -40,20 +40,28 @@
   #cross { position:fixed; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; z-index:9;
     border-radius:50%; background:rgba(255,230,200,.85); box-shadow:0 0 0 1.5px rgba(0,0,0,.45); display:none; pointer-events:none; }
   body.locked #cross { display:block; }
-  #start { position:fixed; inset:0; z-index:15; display:grid; place-content:center; text-align:center; gap:10px;
-    background:rgba(8,9,13,.55); cursor:pointer; }
-  #start b { font-size:17px; color:#ffd9a8; }
-  #start span { color:#c9c0b2; font-size:12px; }
+  /* title screen: the game waits here until 시작하기 is pressed (the room keeps loading / shows dimly behind it) */
+  #start { position:fixed; inset:0; z-index:15; display:grid; place-content:center; justify-items:center; text-align:center; gap:14px;
+    padding:24px 16px; background:radial-gradient(ellipse at center, rgba(28,16,10,.78), rgba(6,5,4,.94)); }
+  #start small { font-size:12px; letter-spacing:.32em; color:#d98c3a; font-weight:600; }
+  #start h1 { margin:0; font-size:clamp(26px, 6vw, 44px); font-weight:700; color:#ffd9a8; line-height:1.2; letter-spacing:.01em; }
+  #start p { margin:0; color:#c9c0b2; font-size:14px; line-height:1.6; max-width:420px; }
+  #start button { margin-top:10px; padding:13px 44px; font:inherit; font-size:17px; font-weight:700; color:#2a1608; cursor:pointer;
+    background:#ffd9a8; border:0; border-radius:999px; box-shadow:0 6px 24px rgba(217,140,58,.35); transition:transform .15s, background .15s; }
+  #start button:hover { background:#ffe6c4; transform:translateY(-1px); }
+  #start button:disabled { background:#5a4636; color:#c9b8a4; cursor:wait; box-shadow:none; transform:none; }
+  #start span { color:#8f8577; font-size:12px; max-width:420px; line-height:1.6; }
   body.locked #start, body.started #start, body.xr #start { display:none; }
+  body:not(.started):not(.xr) #hud { display:none; }   /* settings panel appears once the game has started */
   body.locked #hud { opacity:.35; pointer-events:none; }
   #cams, #mode, #pad { display:none !important; }
   #pad { position:fixed; left:24px; bottom:24px; z-index:12; width:120px; height:120px; border-radius:50%;
     border:1px solid rgba(255,215,170,.3); background:rgba(16,14,12,.35); display:none; touch-action:none; }
   #pad i { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px; border-radius:50%;
     background:rgba(255,215,170,.35); }
-  @media (pointer:coarse) { #pad { display:block; } #start { display:none; } }
+  @media (pointer:coarse) { #pad { display:block; } }
   @media (max-width: 640px) { #hud { left:10px; top:10px; } .panel { padding:8px 10px; } }
-#hint{position:fixed;top:14px;left:50%;transform:translateX(-50%);max-width:min(560px,90vw);padding:10px 16px;border-radius:12px;background:rgba(20,14,10,.78);color:#f3e6d3;font-size:14px;line-height:1.5;text-align:center;pointer-events:none;display:none;z-index:20}
+#hint{display:none!important;position:fixed;top:14px;left:50%;transform:translateX(-50%);max-width:min(560px,90vw);padding:10px 16px;border-radius:12px;background:rgba(20,14,10,.78);color:#f3e6d3;font-size:14px;line-height:1.5;text-align:center;pointer-events:none;display:none;z-index:20}
 </style>
 </head>
 <body>
@@ -73,13 +81,15 @@
       <button id="shadows" aria-pressed="false">그림자</button>
       <button id="music" aria-pressed="true">음악</button>
     </div>
-    <div style="margin-top:7px;font-size:11px;color:#9c9387"><b style="color:#ffd9a8">작업대 앞 제자리에서 체험해요. 시작하면 산타마을 촌장 니콜라스가 문을 열고 들어와 인사해요. 안내(화면 위)를 따라가요.</b>
-      <br>PC: 오른쪽 버튼 드래그 = 둘러보기 · 왼쪽 클릭(누른 채 끌기) = 집기/누르기 · Space = 손 동작 · R 누른 채 = 기울이기 · 휠 = 거리
-      <br>퀘스트3 손: 엄지+검지 집기 / 주먹 = 잡기 · 손가락 끝 = 책·버튼 누르기 · 멀리 있는 것은 손으로 가리키면 빛줄기가 닿고, 그때 집으면 손으로 날아오거나 서랍이 열려요
-      <br>퀘스트3 컨트롤러: 트리거 = 집기(멀리 가리키기 포함) · 그립 = 주먹 · 오른쪽 스틱 = 회전</div>
   </div>
 </div>
-<div id="start"><b>클릭해서 시작하기</b><span>제자리에서 체험해요 · 오른쪽 버튼을 누른 채 끌면 둘러보고, 왼쪽 클릭으로 물건을 만져요</span></div>
+<div id="start">
+  <small>LUSH SANTA</small>
+  <h1>Dear Stranger,<br>from Santa</h1>
+  <p>산타 마을의 작업실에서 마음을 담은 배쓰밤을 만들어<br>이름 모를 누군가에게 선물해요.</p>
+  <button id="startBtn" type="button" disabled>작업실 준비 중…</button>
+  <span>제자리에서 체험해요 · 오른쪽 버튼을 누른 채 끌면 둘러보고, 왼쪽 클릭으로 물건을 만져요</span>
+</div>
 <div id="cross"></div>
 <div id="toast"></div>
 <div id="hint"></div>
@@ -134,7 +144,7 @@ import { VRButton } from 'three/addons/webxr/VRButton.js';
 const showErr = (m) => { const e = document.getElementById('err'); e.style.display='block'; e.textContent += m + '\n'; };
 window.addEventListener('error', e => showErr('⚠ ' + e.message));
 let toastT = 0;
-const toast = (m) => { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1600); };
+const toast = () => {};   // no plain text notices during play (VR test feedback)
 
 // ---------------------------------------------------------------- renderer
 const app = document.getElementById('app');
@@ -302,7 +312,10 @@ el.addEventListener('contextmenu', e => e.preventDefault());
 const startEl = document.getElementById('start');
 const locked = () => document.pointerLockElement === el;
 // PC: no pointer lock. The cursor stays free: right-drag looks around, left click interacts where the cursor is.
-startEl.addEventListener('click', () => { document.body.classList.add('started'); window.__flow?.begin(); });
+// title screen: only the 시작하기 button starts the game (it turns on once the room and the flow are ready)
+const startBtn = document.getElementById('startBtn');
+startBtn.addEventListener('click', () => { if (!window.__flow) return; document.body.classList.add('started'); window.__flow.begin(); });
+const startReady = setInterval(() => { if (window.__flow) { clearInterval(startReady); startBtn.disabled = false; startBtn.textContent = '시작하기'; } }, 300);
 document.addEventListener('pointerlockchange', () => document.body.classList.toggle('locked', locked()));
 document.addEventListener('mousemove', e => {
   if (!locked()) return;

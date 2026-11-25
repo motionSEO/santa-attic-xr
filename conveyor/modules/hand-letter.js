@@ -648,6 +648,22 @@ export class HandLetter {
     });
   }
 
+  // 바른 연필 쥐기 자세의 연필 월드 행렬 (손바닥 좌표틀 frame 기준으로 만든다)
+  writingPose(h, i, frame) {
+    const x = new THREE.Vector3(), y = new THREE.Vector3(), z = new THREE.Vector3();
+    frame.extractBasis(x, y, z);                       // x: 손목→검지 마디(앞), y: 새끼 쪽, z: 손바닥 또는 손등 쪽
+    const grip = this.gripPoint(h, i);
+    // z 가 손바닥 쪽인지: 꼬집은 점은 손바닥 쪽에 있다 (컨트롤러는 z 가 아래 = 손바닥 쪽)
+    const side = grip.clone().sub(h.knuckle).dot(z) < -0.004 ? -1 : 1;
+    const palm = z.clone().multiplyScalar(side);
+    const tipDir = x.clone().multiplyScalar(0.55).addScaledVector(palm, 0.75).addScaledVector(y, -0.3).normalize();   // 앞·아래, 살짝 엄지 쪽
+    const tip = grip.clone().addScaledVector(tipDir, GRIP_TO_TIP);
+    const center = tip.addScaledVector(tipDir, -PENCIL_LEN / 2);
+    const q = new THREE.Quaternion().setFromUnitVectors(_Y, tipDir);   // 연필 +Y = 끝
+    // 연필의 위치를 부모(zone) 기준이 아니라 월드 행렬로 돌려준다
+    return new THREE.Matrix4().compose(center, q, this.pencil.getWorldScale(new THREE.Vector3()));
+  }
+
   // 손바닥 좌표틀: 원점 = 검지 첫 마디, x = 손목 → 검지 마디, 손바닥 가로 = 검지 마디 → 새끼 마디
   // (손가락을 오므리거나 엄지를 움직여도 흔들리지 않는 뼈대만 쓴다)
   handFrame(h, out) {
@@ -684,7 +700,9 @@ export class HandLetter {
           this.tipFilter.reset();
           this.frameQ = null;
           this.pencil.updateMatrixWorld();
-          this.gripOffset = (this.gripOffset ?? new THREE.Matrix4()).copy(_hf).invert().multiply(this.pencil.matrixWorld);
+          // 잡는 순간 바른 쓰기 자세로 손에 쥐여 준다 (잡은 위치·각도 그대로가 아니라): 엄지·검지 사이에 끼고,
+          // 끝은 손가락 앞쪽 아래(손바닥 쪽)로, 윗부분은 엄지와 검지 사이 홈을 지나 손목 쪽 위로
+          this.gripOffset = (this.gripOffset ?? new THREE.Matrix4()).copy(_hf).invert().multiply(this.writingPose(h, i, _hf));
         }
       });
     }
