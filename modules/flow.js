@@ -840,7 +840,7 @@ export class Flow {
   // Santa is modules/santa.js (window.createSanta). The door is the room's 'DoorLeaf' node (index.html passes it as ctx.door).
   setupSanta() {
     if (this.santa || !window.createSanta) return;
-    const S = this.santa = window.createSanta(THREE, { scale: 1.2 });       // ~1.56 m with the hat: fits under the 1.74 m door
+    const S = this.santa = window.createSanta(THREE, { scale: 1.1 });       // ~1.62 m with the hat: fits under the 1.74 m door
     S.object.visible = false; this.scene.add(S.object);
     const floorY = (x, z) => {                                               // floor height under a point (room + snow outside)
       const r = new THREE.Raycaster(V(x, 1.5, z), V(0, -1, 0), 0, 2.5);
@@ -907,7 +907,8 @@ export class Flow {
     this.later(0.8, () => {
       this.setHint('산타마을 촌장 니콜라스', '');
       this.santaWalking = true;
-      S.walkTo(P.stop, { via: P.via, speed: 0.75 })
+      S.walkTo(P.via[1], { via: P.via[0], speed: 0.6 })                  // through the door (curved path via the threshold)
+        .then(() => S.walkTo(P.stop, { speed: 0.6 }))
         .then(() => { this.santaWalking = false; this.closeDoor(); return S.turnTo(this.headPos(), 0.7); })
         .then(() => this.startTalk());
     });
@@ -965,10 +966,7 @@ export class Flow {
     if (T) {
       const line = OPENING.lines[T.i] || '';
       if (!T.done) {
-        const prev = Math.floor(T.typed);
-        T.typed = Math.min(line.length, T.typed + dt * 20);
-        const ch = Math.floor(T.typed);
-        if (ch !== prev && line[prev] !== ' ') this.tone(520 + Math.random() * 120, 0.04, 'square', 0.025);
+        T.typed = Math.min(line.length, T.typed + dt * 20);                  // santa.js makes the talking blips itself
         if (T.typed >= line.length) T.done = true;
       }
       const shown = Math.floor(T.typed) + (T.done ? 1000 : 0);
@@ -976,7 +974,7 @@ export class Flow {
       S.talk(!T.done);
       const m = T.panel.mesh, p = S.object.position;
       const toHead = V(head.x - p.x, 0, head.z - p.z).normalize();
-      m.position.set(p.x, p.y + 1.92, p.z).addScaledVector(toHead, 0.25);
+      m.position.set(p.x, p.y + 1.82, p.z).addScaledVector(toHead, 0.25);
       m.lookAt(head);
     }
     // head follows the player once he is inside (during the walk he looks where he goes)

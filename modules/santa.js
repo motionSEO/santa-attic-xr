@@ -1,242 +1,242 @@
-// santa.js — a low-poly Santa (Nicolas) built from primitives, with simple procedural animation.
-// Plain script: defines window.createSanta(THREE, opts). No assets, works from file:// too.
-//
-//   const santa = createSanta(THREE, { scale: 1.2 });
-//   scene.add(santa.object);                       // faces +z, feet at y = 0
-//   await santa.walkTo(target, { via, speed, ground });   // via: Vector3 or [Vector3...], ground(x, z) -> floor y (optional)
-//   await santa.turnTo(point, seconds);
-//   santa.wave(true / false); santa.talk(true / false);
-//   santa.setExpression('happy');                  // santa.expressions = ['neutral', 'happy', 'surprised', 'wink', 'sad']
-//   santa.update(dt, lookAtWorldPoint | null);     // every frame; the head turns toward the point
-//
-// Height at scale 1 is about 1.3 m (hat tip included).
-(function () {
-  function createSanta(THREE, opts = {}) {
-    const scale = opts.scale ?? 1;
-    const lit = (color, o = {}) => new THREE.MeshLambertMaterial({ color, ...o });
-    const M = {
-      red: lit(0xc22a2e), redDark: lit(0x8e1c22), white: lit(0xf4f1ea), skin: lit(0xf0c3a0), cheek: lit(0xe88f86),
-      nose: lit(0xe59a86), black: lit(0x1d1714), boot: lit(0x24160e), gold: lit(0xd8a640), glove: lit(0x2f5a34),
-      eye: new THREE.MeshBasicMaterial({ color: 0x1b1410 }), shine: new THREE.MeshBasicMaterial({ color: 0xffffff }),
-      mouth: lit(0x5a1a1a), lid: lit(0xe8b896)
-    };
-    const mk = (geo, mat, x = 0, y = 0, z = 0, parent) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; if (parent) parent.add(m); return m; };
-    const grp = (x = 0, y = 0, z = 0, parent) => { const g = new THREE.Group(); g.position.set(x, y, z); if (parent) parent.add(g); return g; };
-    const S = (r, w = 14, h = 10) => new THREE.SphereGeometry(r, w, h);
-    const C = (rt, rb, h, n = 12) => new THREE.CylinderGeometry(rt, rb, h, n);
+/* =====================================================================
+   santa.js — Nicholas (felt Santa) character module for Three.js
+   ---------------------------------------------------------------------
+   <script src="santa.js"></script>   (plain script, works by double-click)
+   then in your code:
+   const santa = createSanta(THREE, { scale: 1.25 });
+   scene.add(santa.object);
 
-    const object = new THREE.Group(); object.name = 'Santa';
-    const body = grp(0, 0, 0, object);                 // bobs while walking
-    body.scale.setScalar(scale);
+   // every frame
+   santa.update(dt, camera);
 
-    // ---- legs (hip pivot, knee pivot)
-    const legs = [-1, 1].map((s) => {
-      const hip = grp(s * 0.1, 0.5, 0, body);
-      mk(C(0.075, 0.068, 0.24), M.red, 0, -0.12, 0, hip);
-      const knee = grp(0, -0.24, 0, hip);
-      mk(C(0.068, 0.06, 0.2), M.red, 0, -0.1, 0, knee);
-      mk(new THREE.TorusGeometry(0.066, 0.025, 6, 14).rotateX(Math.PI / 2), M.white, 0, -0.17, 0, knee);   // boot cuff
-      const boot = mk(new THREE.BoxGeometry(0.13, 0.09, 0.22), M.boot, 0, -0.215, 0.035, knee);
-      mk(C(0.07, 0.07, 0.08), M.boot, 0, -0.18, 0, knee);
-      return { hip, knee };
-    });
+   await santa.walkTo(new THREE.Vector3(0, 0, -2), { speed: 0.6 });
+   await santa.turnTo(camera.position);
+   santa.wave(true);
+   santa.talk(true);              // mouth flaps until talk(false)
+   santa.setExpression("happy");  // neutral | happy | surprised | sad | closed
 
-    // ---- torso: coat, belly, belt, trim
-    const torso = grp(0, 0.5, 0, body);
-    const belly = mk(S(0.3, 18, 14), M.red, 0, 0.24, 0.01, torso); belly.scale.set(1, 1.05, 0.92);
-    mk(C(0.25, 0.3, 0.16, 18), M.red, 0, 0.04, 0, torso);                                          // coat skirt
-    mk(new THREE.TorusGeometry(0.29, 0.04, 8, 22).rotateX(Math.PI / 2), M.white, 0, -0.03, 0, torso);   // hem trim
-    const belt = mk(new THREE.TorusGeometry(0.285, 0.035, 6, 24).rotateX(Math.PI / 2), M.black, 0, 0.15, 0.01, torso); belt.scale.set(1, 0.94, 1);
-    mk(new THREE.BoxGeometry(0.11, 0.09, 0.03), M.gold, 0, 0.15, 0.285, torso);
-    mk(new THREE.BoxGeometry(0.06, 0.045, 0.035), M.black, 0, 0.15, 0.29, torso);
-    const stripe = mk(new THREE.BoxGeometry(0.07, 0.36, 0.04), M.white, 0, 0.3, 0.255, torso); stripe.rotation.x = -0.12;
-    mk(S(0.2, 14, 10), M.red, 0, 0.44, -0.01, torso).scale.set(1.25, 0.6, 1.0);                     // shoulders
-    mk(new THREE.TorusGeometry(0.11, 0.035, 6, 16).rotateX(Math.PI / 2), M.white, 0, 0.5, 0, torso); // collar
+   Swapping in a real model later:
+   keep this API and replace buildBody() with a GLB loader; map
+   legs/arms/head to the rig bones and expressions to a face atlas.
+   ===================================================================== */
 
-    // ---- arms (shoulder pivot, elbow pivot); rest pose hangs down and slightly out
-    const arms = [-1, 1].map((s) => {
-      const sh = grp(s * 0.28, 0.43, 0, torso);
-      mk(S(0.075, 10, 8), M.red, 0, 0, 0, sh);
-      mk(C(0.07, 0.062, 0.22), M.red, 0, -0.11, 0, sh);
-      const el = grp(0, -0.22, 0, sh);
-      mk(S(0.062, 10, 8), M.red, 0, 0, 0, el);                                                         // elbow
-      mk(C(0.062, 0.055, 0.18), M.red, 0, -0.09, 0, el);
-      mk(new THREE.TorusGeometry(0.058, 0.024, 6, 14).rotateX(Math.PI / 2), M.white, 0, -0.18, 0, el);   // fur cuff
-      const hand = grp(0, -0.23, 0, el);
-      mk(S(0.058, 12, 10), M.glove, 0, 0, 0, hand).scale.set(0.9, 1.05, 0.8);
-      mk(S(0.026, 8, 6), M.glove, s * -0.045, 0.02, 0.02, hand);                                      // thumb
-      return { sh, el, hand, s };
-    });
+function createSanta(THREE, opts = {}) {
+  const { scale = 1.25, castShadow = true, sounds = true } = opts;
 
-    // ---- head
-    const neck = grp(0, 0.5, 0, torso);                // head group pivots here (look-at)
-    const head = grp(0, 0.13, 0, neck);
-    mk(S(0.15, 18, 14), M.skin, 0, 0, 0, head);
-    mk(S(0.152, 16, 12), M.white, 0, 0.01, -0.03, head).scale.set(1.02, 0.95, 0.95);              // hair at the back
-    const nose = mk(S(0.035, 10, 8), M.nose, 0, -0.005, 0.15, head);
-    for (const s of [-1, 1]) mk(S(0.032, 8, 6), M.cheek, s * 0.085, -0.025, 0.12, head).scale.set(1, 0.7, 0.5);
-    // eyes: dark ovals + a lid (skin coloured) that slides down to blink / wink
-    const eyes = [-1, 1].map((s) => {
-      const g = grp(s * 0.056, 0.035, 0.132, head);
-      const e = mk(S(0.02, 10, 8), M.eye, 0, 0, 0, g); e.scale.set(0.85, 1.15, 0.6);
-      mk(S(0.006, 6, 4), M.shine, 0.006, 0.008, 0.011, g);
-      const lid = grp(0, 0, 0, g);
-      const lm = mk(S(0.024, 10, 8), M.lid, 0, 0.02, 0.002, lid); lm.scale.set(1, 0.05, 0.7);
-      return { g, lid: lm };
-    });
-    const brows = [-1, 1].map((s) => {
-      const b = mk(new THREE.BoxGeometry(0.06, 0.018, 0.02), M.white, s * 0.058, 0.08, 0.135, head);
-      b.userData.s = s; return b;
-    });
-    // beard + mustache + mouth (jaw group drops a little while talking)
-    const jaw = grp(0, -0.04, 0.02, head);
-    const beard = mk(S(0.16, 16, 12), M.white, 0, -0.07, 0.03, jaw); beard.scale.set(1.02, 1.05, 0.8);
-    mk(S(0.09, 10, 8), M.white, 0, -0.17, 0.06, jaw).scale.set(1.1, 1.1, 0.8);
-    const mouth = mk(S(0.032, 12, 8), M.mouth, 0, -0.052, 0.168, head); mouth.scale.set(1, 0.15, 0.4);
-    const smile = mk(new THREE.TorusGeometry(0.028, 0.008, 6, 12, Math.PI), M.mouth, 0, -0.04, 0.172, head); smile.rotation.z = Math.PI; smile.visible = false;
-    for (const s of [-1, 1]) { const m = mk(S(0.05, 10, 8), M.white, s * 0.042, -0.002, 0.14, head); m.scale.set(1.1, 0.42, 0.55); m.rotation.z = s * -0.35; }
-    // glasses
-    for (const s of [-1, 1]) mk(new THREE.TorusGeometry(0.028, 0.004, 6, 16), M.gold, s * 0.056, 0.035, 0.146, head);
-    mk(new THREE.BoxGeometry(0.03, 0.005, 0.005), M.gold, 0, 0.04, 0.152, head);
-    // hat: brim, bent cone, pom-pom
-    const hat = grp(0, 0.075, -0.01, head); hat.rotation.x = -0.12;
-    mk(new THREE.TorusGeometry(0.14, 0.042, 8, 22).rotateX(Math.PI / 2), M.white, 0, 0, 0, hat);
-    mk(C(0.06, 0.14, 0.14, 16), M.red, 0, 0.07, -0.005, hat);
-    const tip = grp(0, 0.14, -0.005, hat); tip.rotation.x = -0.6;
-    mk(new THREE.ConeGeometry(0.065, 0.2, 14), M.red, 0, 0.1, 0, tip);
-    const pom = mk(S(0.045, 10, 8), M.white, 0, 0.2, 0, tip);
-
-    // ---- expressions
-    const EXPR = {
-      neutral:   { open: [1, 1], brow: [0, 0], smile: 0, mouthW: 1 },
-      happy:     { open: [0.55, 0.55], brow: [0.012, -0.15], smile: 1, mouthW: 1.2 },
-      surprised: { open: [1.25, 1.25], brow: [0.03, 0.12], smile: 0, mouthW: 0.7, mouthO: 0.6 },
-      wink:      { open: [1, 0.05], brow: [0.008, -0.1], smile: 1, mouthW: 1.1 },
-      sad:       { open: [0.8, 0.8], brow: [-0.004, 0.3], smile: 0, mouthW: 0.8 }
-    };
-    let expr = EXPR.neutral;
-    const cur = { open: [1, 1], browY: 0, browR: 0, smile: 0, mouthW: 1, mouthO: 0 };
-
-    // ---- state
-    let path = null, walkSpeed = 0.8, ground = null, resolveWalk = null;
-    let turn = null;
-    let waving = false, talking = false, waveK = 0, talkK = 0, walkK = 0;
-    let phase = 0, t = 0, blinkT = 2 + Math.random() * 2, blink = 0;
-    const headYP = { yaw: 0, pitch: 0 };
-    const tmp = new THREE.Vector3(), inv = new THREE.Matrix4();
-    const lerp = THREE.MathUtils.lerp, damp = (a, b, k, dt) => lerp(a, b, 1 - Math.exp(-k * dt));
-    const wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-    const yawTo = (p) => Math.atan2(p.x - object.position.x, p.z - object.position.z);
-
-    function walkTo(target, o = {}) {
-      resolveWalk?.();
-      const via = o.via ? (Array.isArray(o.via) ? o.via : [o.via]) : [];
-      path = [...via, target].map((v) => v.clone());
-      walkSpeed = o.speed ?? 0.8; ground = o.ground || null; turn = null;
-      return new Promise((res) => { resolveWalk = res; });
-    }
-    function turnTo(point, dur = 0.6) {
-      const from = object.rotation.y, to = from + wrapA(yawTo(point) - from);
-      return new Promise((res) => { turn = { from, to, t: 0, dur: Math.max(0.05, dur), res }; });
-    }
-
-    function update(dt, look) {
-      t += dt;
-      // walking along the path
-      let moving = false;
-      if (path) {
-        const wpnt = path[0];
-        tmp.set(wpnt.x - object.position.x, 0, wpnt.z - object.position.z);
-        const d = tmp.length(), step = walkSpeed * dt;
-        const want = Math.atan2(tmp.x, tmp.z);
-        object.rotation.y += wrapA(want - object.rotation.y) * (1 - Math.exp(-8 * dt));
-        if (d <= Math.max(step, 0.01)) {
-          object.position.x = wpnt.x; object.position.z = wpnt.z; if (!ground) object.position.y = wpnt.y;
-          path.shift();
-          if (!path.length) { path = null; const r = resolveWalk; resolveWalk = null; r?.(); }
-        } else {
-          const y0 = object.position.y;
-          object.position.addScaledVector(tmp.normalize(), step);
-          if (!ground) object.position.y = y0 + (wpnt.y - y0) * Math.min(1, step / d);
-          moving = true;
-        }
-        if (ground) { const gy = ground(object.position.x, object.position.z); if (gy != null) object.position.y = gy; }
-      }
-      if (turn) {
-        turn.t += dt; const k = Math.min(1, turn.t / turn.dur), e = k * k * (3 - 2 * k);
-        object.rotation.y = lerp(turn.from, turn.to, e);
-        if (k >= 1) { const r = turn.res; turn = null; r(); }
-      }
-        walkK = damp(walkK, moving ? 1 : turn ? 0.45 : 0, 8, dt);
-      phase += dt * (moving ? walkSpeed * 7.5 : turn ? 5 : 0);
-      const sw = Math.sin(phase), sw2 = Math.sin(phase * 2);
-      // legs + body bob
-      legs.forEach((l, i) => {
-        const s = i ? -1 : 1, a = sw * s;
-        l.hip.rotation.x = a * 0.5 * walkK;
-        l.knee.rotation.x = Math.max(0, -Math.cos(phase + (i ? Math.PI : 0))) * 0.7 * walkK;
-      });
-      body.position.y = (Math.abs(sw) * 0.035 - 0.012) * walkK * scale + Math.sin(t * 1.6) * 0.003 * scale;
-      body.rotation.z = sw * 0.04 * walkK;
-      torso.rotation.y = sw * 0.08 * walkK;
-      torso.scale.set(1, 1 + Math.sin(t * 1.6) * 0.008, 1);                       // breathing
-      // arms: swing while walking, otherwise hang. Santa faces +z, so his right arm is the -x one (s = -1)
-      waveK = damp(waveK, waving ? 1 : 0, 6, dt);
-      arms.forEach((a, i) => {
-        const s = a.s, swing = -sw * (i ? 1 : -1) * 0.45 * walkK;
-        let shX = swing, shZ = s * 0.18, elX = -0.25 - 0.2 * walkK, elZ = 0;
-        if (s < 0 && waveK > 0.001) {          // Santa's right hand (-x side, since he faces +z) waves
-          const w = waveK;
-          shX = lerp(shX, -0.3, w); shZ = lerp(shZ, -2.5, w);
-          elX = lerp(elX, 0, w); elZ = lerp(0, -0.9 + Math.sin(t * 9) * 0.45, w);
-        }
-        a.sh.rotation.set(shX, 0, shZ);
-        a.el.rotation.set(elX, 0, elZ);
-        a.hand.rotation.set(0, 0, s < 0 ? elZ * 0.3 : 0);
-      });
-      // expression blend
-      const ex = expr;
-      blinkT -= dt; if (blinkT <= 0) { blink = 0.16; blinkT = 2.5 + Math.random() * 3; }
-      blink = Math.max(0, blink - dt);
-      const bl = blink > 0 ? Math.sin((blink / 0.16) * Math.PI) : 0;
-      for (let i = 0; i < 2; i++) {
-        cur.open[i] = damp(cur.open[i], ex.open[i], 14, dt);
-        const o = Math.max(0.05, cur.open[i] * (1 - bl));
-        eyes[i].g.scale.y = Math.min(1.25, o);
-        eyes[i].lid.scale.y = 0.05 + (1 - Math.min(1, o)) * 0.6;
-      }
-      cur.browY = damp(cur.browY, ex.brow[0], 10, dt); cur.browR = damp(cur.browR, ex.brow[1], 10, dt);
-      brows.forEach((b) => { b.position.y = 0.08 + cur.browY; b.rotation.z = b.userData.s * cur.browR; });
-      cur.smile = damp(cur.smile, ex.smile, 10, dt); cur.mouthW = damp(cur.mouthW, ex.mouthW, 10, dt);
-      // talking: mouth + jaw flap with a little irregularity
-      talkK = damp(talkK, talking ? 1 : 0, 12, dt);
-      const flap = talkK * (0.5 + 0.5 * Math.abs(Math.sin(t * 13) * Math.sin(t * 7.3 + 1)));
-      const open = Math.max(ex.mouthO || 0, flap);
-      mouth.scale.set(cur.mouthW, 0.15 + open * 0.85, 0.4);
-      smile.visible = cur.smile > 0.5 && open < 0.25; mouth.visible = !smile.visible;
-      jaw.position.y = -0.04 - open * 0.018;
-      // head: look at a world point (clamped), plus a nod while talking
-      let ty = 0, tp = 0;
-      if (look) {
-        object.updateMatrixWorld();
-        tmp.copy(look).applyMatrix4(inv.copy(neck.matrixWorld).invert());
-        ty = THREE.MathUtils.clamp(Math.atan2(tmp.x, tmp.z), -0.9, 0.9);
-        tp = THREE.MathUtils.clamp(-Math.atan2(tmp.y - 0.13, Math.hypot(tmp.x, tmp.z)), -0.45, 0.45);
-      }
-      headYP.yaw = damp(headYP.yaw, ty, 5, dt); headYP.pitch = damp(headYP.pitch, tp, 5, dt);
-      neck.rotation.set(headYP.pitch + Math.sin(t * 5.5) * 0.04 * talkK, headYP.yaw, Math.sin(t * 2.1) * 0.03 * talkK + sw2 * 0.02 * walkK);
-      pom.position.x = Math.sin(t * 3 + phase) * 0.01; tip.rotation.z = Math.sin(phase) * 0.12 * walkK;
-    }
-
-    return {
-      object, walkTo, turnTo, update,
-      wave(on = true) { waving = !!on; },
-      talk(on = true) { talking = !!on; },
-      setExpression(name) { if (EXPR[name]) expr = EXPR[name]; },
-      get expressions() { return Object.keys(EXPR); },
-      get walking() { return !!path; },
-      stop() { path = null; turn = null; resolveWalk?.(); resolveWalk = null; }
-    };
+  /* ---------- materials ---------- */
+  const felt = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1 });
+  const M = {
+    red: felt(0xc8282c), pants: felt(0x8e1e22), strap: felt(0x6a1a1a), cream: felt(0xf1e4d4),
+    skin: felt(0xf4a48e), boot: felt(0x6e2a20), white: felt(0xffffff), mouth: felt(0x9a3a32),
+    gold: new THREE.MeshStandardMaterial({ color: 0xd4a640, metalness: 0.8, roughness: 0.3 }),
+    black: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.3 }),
+  };
+  const geos = [];
+  function part(geo, mat, x, y, z, parent, sx = 1, sy = 1, sz = 1) {
+    geos.push(geo);
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z); m.scale.set(sx, sy, sz);
+    m.castShadow = castShadow; parent.add(m); return m;
   }
-  window.createSanta = createSanta;
-})();
+
+  /* ---------- body ---------- */
+  const root = new THREE.Group(); root.name = "Santa";
+  const body = new THREE.Group(); root.add(body);
+  const legs = [], arms = [], eyes = [], pupils = [], brows = [];
+
+  for (const s of [-1, 1]) {
+    const hip = new THREE.Group(); hip.position.set(0.13 * s, 0.32, 0); root.add(hip);
+    part(new THREE.CylinderGeometry(0.1, 0.1, 0.2, 14), M.pants, 0, -0.08, 0, hip);
+    part(new THREE.CylinderGeometry(0.11, 0.11, 0.07, 14), M.cream, 0, -0.18, 0, hip);
+    part(new THREE.SphereGeometry(0.11, 14, 10), M.boot, 0, -0.27, 0.03, hip, 1, 0.55, 1.35);
+    legs.push(hip);
+  }
+  part(new THREE.SphereGeometry(0.32, 24, 18), M.pants, 0, 0.5, 0, body, 1, 0.8, 0.9);
+  part(new THREE.SphereGeometry(0.3, 24, 18), M.red, 0, 0.7, 0, body, 1, 0.75, 0.88);
+  for (const s of [-1, 1]) {
+    part(new THREE.BoxGeometry(0.05, 0.36, 0.02), M.strap, 0.15 * s, 0.68, 0.25, body).rotation.x = -0.35;
+    part(new THREE.SphereGeometry(0.035, 12, 8), M.gold, 0.15 * s, 0.53, 0.29, body, 1, 1, 0.5);
+  }
+  const ARM_DOWN = 1.05;
+  for (const s of [-1, 1]) {
+    const sh = new THREE.Group(); sh.position.set(0.24 * s, 0.82, 0); body.add(sh);
+    part(new THREE.CylinderGeometry(0.07, 0.075, 0.3, 12), M.red, 0.15 * s, 0, 0, sh).rotation.z = Math.PI / 2;
+    part(new THREE.CylinderGeometry(0.085, 0.085, 0.08, 12), M.cream, 0.32 * s, 0, 0, sh).rotation.z = Math.PI / 2;
+    part(new THREE.SphereGeometry(0.065, 12, 8), M.skin, 0.4 * s, 0, 0, sh, 1.3, 0.6, 1);
+    sh.rotation.z = -ARM_DOWN * s;
+    arms.push(sh);
+  }
+
+  /* ---------- head / face ---------- */
+  const head = new THREE.Group(); head.position.set(0, 1.05, 0); body.add(head);
+  part(new THREE.SphereGeometry(0.2, 20, 16), M.skin, 0, 0, 0, head, 1, 1.05, 0.95);
+  part(new THREE.SphereGeometry(0.05, 10, 8), M.skin, -0.2, 0, 0, head, 0.6, 1, 1);
+  part(new THREE.SphereGeometry(0.05, 10, 8), M.skin, 0.2, 0, 0, head, 0.6, 1, 1);
+  part(new THREE.SphereGeometry(0.24, 20, 14), M.cream, 0, 0.08, -0.04, head, 1, 0.95, 0.9);
+  part(new THREE.SphereGeometry(0.3, 20, 16), M.cream, 0, -0.2, 0.06, head, 1, 0.9, 0.75);
+  part(new THREE.TorusGeometry(0.07, 0.04, 10, 20), M.cream, 0.06, 0.3, 0, head).rotation.y = 0.2;
+  part(new THREE.SphereGeometry(0.045, 12, 10), M.cream, 0.06, 0.3, 0, head);
+  part(new THREE.SphereGeometry(0.12, 16, 12), M.skin, 0, 0.04, 0.12, head, 1.15, 0.8, 0.6);
+  for (const s of [-1, 1]) {
+    const eye = new THREE.Group(); eye.position.set(0.055 * s, 0.03, 0.19); head.add(eye);
+    part(new THREE.SphereGeometry(0.035, 12, 10), M.white, 0, 0, 0, eye, 1, 1, 0.5);
+    pupils.push(part(new THREE.SphereGeometry(0.022, 10, 8), M.black, 0, -0.01, 0.015, eye));
+    eyes.push(eye);
+    const brow = new THREE.Group(); brow.position.set(0.06 * s, 0.085, 0.18); head.add(brow);
+    part(new THREE.SphereGeometry(0.03, 10, 6), M.cream, 0, 0, 0, brow, 1.3, 0.5, 0.6);
+    brows.push(brow);
+    part(new THREE.TorusGeometry(0.036, 0.004, 6, 18), M.gold, 0.055 * s, 0.02, 0.215, head);
+  }
+  part(new THREE.SphereGeometry(0.1, 14, 10), M.cream, -0.06, -0.04, 0.2, head, 1, 0.45, 0.6);
+  part(new THREE.SphereGeometry(0.1, 14, 10), M.cream, 0.06, -0.04, 0.2, head, 1, 0.45, 0.6);
+  const mouth = part(new THREE.SphereGeometry(0.02, 10, 8), M.mouth, 0, -0.08, 0.23, head, 1, 0.6, 0.5);
+
+  root.scale.setScalar(scale);
+
+  /* ---------- expressions (target values, eased each frame) ---------- */
+  const EXPR = {
+    //          eyeY  eyeS  browY  browTilt mouthW mouthH
+    neutral:   [1.0, 1.0, 0.0, 0.0, 1.0, 0.6],
+    happy:     [0.35, 1.0, 0.01, -0.2, 1.6, 0.5],
+    surprised: [1.25, 1.2, 0.025, 0.0, 0.9, 1.6],
+    sad:       [0.8, 1.0, -0.005, 0.35, 0.8, 0.4],
+    closed:    [0.08, 1.0, -0.005, 0.0, 1.0, 0.6],
+  };
+  let expr = EXPR[opts.expression] ? opts.expression : "surprised";   // default face
+  const cur = [...EXPR[expr]];
+
+  /* ---------- state ---------- */
+  const st = {
+    walking: false, talking: false, waving: false,
+    walkTask: null, turnTask: null, time: 0, nextBlink: 2 + Math.random() * 3, blink: 0, lastStep: 0,
+  };
+  const tmp = new THREE.Vector3();
+
+  let actx = null;
+  function tone(f, d, type = "sine", v = 0.15) {
+    if (!sounds) return;
+    try {
+      actx ??= new AudioContext();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.value = f;
+      g.gain.setValueAtTime(v, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + d);
+      o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + d);
+    } catch { /* audio blocked until a user gesture */ }
+  }
+  const angleTo = (p) => Math.atan2(p.x - root.position.x, p.z - root.position.z);
+  const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+  /* ---------- public API ---------- */
+  function walkTo(target, { speed = 0.6, via = null } = {}) {
+    // optional `via` point makes a smooth curved path (quadratic bezier)
+    const from = root.position.clone(), to = target.clone(), mid = via ? via.clone() : from.clone().lerp(to, 0.5);
+    const len = from.distanceTo(mid) + mid.distanceTo(to);
+    st.walkTask?.resolve();
+    return new Promise((resolve) => {
+      st.walkTask = { from, mid, to, t: 0, dur: Math.max(0.3, len / speed), resolve };
+      st.walking = true;
+    });
+  }
+  function turnTo(point, duration = 0.6) {
+    const goal = angleTo(point);
+    st.turnTask?.resolve();
+    return new Promise((resolve) => {
+      const start = root.rotation.y;
+      st.turnTask = { start, delta: wrapAngle(goal - start), t: 0, dur: duration, resolve };
+    });
+  }
+  function setExpression(name) { if (EXPR[name]) expr = name; }
+  function talk(on = true) { st.talking = on; }
+  function wave(on = true) { st.waving = on; }
+  function stop() { st.walkTask?.resolve(); st.walkTask = null; st.walking = false; }
+
+  function update(dt, lookTarget = null) {
+    st.time += dt; const t = st.time;
+    const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2);
+
+    // walking along path
+    const w = st.walkTask;
+    if (w) {
+      w.t = Math.min(1, w.t + dt / w.dur);
+      const e = ease(w.t);
+      const a = w.from.clone().lerp(w.mid, e), b = w.mid.clone().lerp(w.to, e), p = a.lerp(b, e);
+      tmp.subVectors(p, root.position);
+      if (tmp.lengthSq() > 1e-8) {
+        const goal = Math.atan2(tmp.x, tmp.z);
+        root.rotation.y += wrapAngle(goal - root.rotation.y) * Math.min(1, dt * 10);
+      }
+      root.position.copy(p);
+      if (w.t >= 1) { st.walkTask = null; st.walking = false; w.resolve(); }
+    }
+    // turning
+    const tr = st.turnTask;
+    if (tr) {
+      tr.t = Math.min(1, tr.t + dt / tr.dur);
+      root.rotation.y = tr.start + tr.delta * ease(tr.t);
+      if (tr.t >= 1) { st.turnTask = null; tr.resolve(); }
+    }
+
+    // locomotion pose
+    const cyc = t * 7;
+    if (st.walking) {
+      legs[0].rotation.x = Math.sin(cyc) * 0.55; legs[1].rotation.x = -Math.sin(cyc) * 0.55;
+      arms[0].rotation.x = -Math.sin(cyc) * 0.4;
+      if (!st.waving) arms[1].rotation.x = Math.sin(cyc) * 0.4;
+      body.position.y = Math.abs(Math.sin(cyc)) * 0.035;
+      body.rotation.z = Math.sin(cyc) * 0.05;
+      if (t - st.lastStep > Math.PI / 7) { st.lastStep = t; tone(90 + Math.random() * 20, 0.08, "triangle", 0.2); }
+    } else {
+      for (const l of legs) l.rotation.x *= 0.85;
+      arms[0].rotation.x *= 0.85;
+      body.position.y = Math.sin(t * 2) * 0.008;
+      body.rotation.z *= 0.9;
+    }
+    // right arm: wave or relax
+    // arms[0] = left (+z is down), arms[1] = right (-z is down, +z raises it)
+    const armGoal = st.waving ? 0.5 + Math.sin(t * 8) * 0.35 : -ARM_DOWN;
+    arms[1].rotation.z += (armGoal - arms[1].rotation.z) * Math.min(1, dt * 10);
+    if (st.waving) arms[1].rotation.x *= 0.8;
+    arms[0].rotation.z += (ARM_DOWN - arms[0].rotation.z) * Math.min(1, dt * 10);
+
+    // head sway + look at target
+    head.rotation.z = Math.sin(t * 1.5) * (st.talking ? 0.05 : 0.02);
+    if (lookTarget) {
+      root.updateMatrixWorld();
+      const local = head.parent.worldToLocal(tmp.copy(lookTarget));
+      const yaw = Math.max(-0.5, Math.min(0.5, Math.atan2(local.x, local.z)));
+      head.rotation.y += (yaw - head.rotation.y) * Math.min(1, dt * 4);
+    } else head.rotation.y *= 0.9;
+
+    // expression easing
+    const goal = EXPR[expr], k = Math.min(1, dt * 10);
+    for (let i = 0; i < cur.length; i++) cur[i] += (goal[i] - cur[i]) * k;
+    // auto blink
+    st.nextBlink -= dt;
+    if (st.nextBlink <= 0) { st.blink = 0.15; st.nextBlink = 2.5 + Math.random() * 3; }
+    st.blink = Math.max(0, st.blink - dt);
+    const blinkMul = st.blink > 0 ? 0.08 : 1;
+    for (const e of eyes) { e.scale.set(cur[1], cur[0] * cur[1] * blinkMul, 1); }
+    brows.forEach((b, i) => { b.position.y = 0.085 + cur[2]; b.rotation.z = cur[3] * (i ? -1 : 1); });
+    // mouth: talking flaps on top of expression
+    const flap = st.talking ? Math.abs(Math.sin(t * 18)) * 0.9 : 0;
+    mouth.scale.set(cur[4], cur[5] + flap, 0.5);
+    if (st.talking && Math.sin(t * 18) > 0.98) tone(520 + Math.random() * 120, 0.04, "square", 0.03);
+  }
+
+  function dispose() {
+    root.removeFromParent();
+    geos.forEach((g) => g.dispose());
+    Object.values(M).forEach((m) => m.dispose());
+  }
+
+  return {
+    object: root,
+    parts: { body, head, legs, arms, eyes, pupils, brows, mouth },
+    expressions: Object.keys(EXPR),
+    walkTo, turnTo, talk, wave, setExpression, stop, update, dispose,
+    get isWalking() { return st.walking; },
+  };
+}
+
+if (typeof window !== "undefined") window.createSanta = createSanta;

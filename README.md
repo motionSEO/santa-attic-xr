@@ -39,7 +39,7 @@
 - `modules/herbs.js` 허브 채취 + 손/컨트롤러/마우스 입력
 - `modules/mug.js` 코코아 머그 (김, 마시기, 다시 채우기)
 - `modules/flow.js` 체험 흐름 전체 (단계, 임시 오브젝트, 책/편지 UI, 에셋 교체)
-- `modules/santa.js` 산타(니콜라스) 캐릭터 `createSanta(THREE)`: walkTo, turnTo, wave, talk, setExpression. 단독 테스트는 `santa-test.html`. 오프닝 대사는 `flow.js` 맨 위 `OPENING`, 멈추는 자리는 `L.santa`
+- `modules/santa.js` 산타(니콜라스) 캐릭터 원본 모듈 `createSanta(THREE)`: walkTo, turnTo, wave, talk, setExpression. 단독 테스트는 `santa-test.html`. 오프닝 대사는 `flow.js` 맨 위 `OPENING`, 멈추는 자리는 `L.santa`
 - `ASSETS.md`, `assets/*.example.json` 에셋 전달 형식과 교체 설정 예시
 - `herb-test.html`, `mug-test.html`, `drawer-test.html`, `snowglobe-test.html` 모듈 단독 테스트 페이지
 - Blender 원본 `Room_Santa2_v2.blend`(108MB)는 GitHub 파일 크기 제한(100MB)을 넘어서 저장소에 넣지 않았어요. 전달 zip에 있어요
