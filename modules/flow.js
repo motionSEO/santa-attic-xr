@@ -773,15 +773,26 @@ export class Flow {
   // where to go next: the chalk Marker from rush-xr-ui. On the desk / shelf it is a ring around the thing with an arrow
   // bobbing above it ('down'); around something floating in the air the ring stands up and faces the player ('forward').
   // { obj, off } puts the ring at an offset from the object (a drawer's name tag, a plant's leaves).
+  // Each marker is sized to its object so it never sits on it: the ring goes around the object's footprint (or, for
+  // a floating thing / drawer tag, stands up around it), and the arrow floats clear above its top.
   setMarkers(targets) {
     for (const m of this.markers) m.obj.removeFromParent();
     this.markers = targets.filter(Boolean).map(t => {
       const target = t.obj || t, floating = t.mode ? t.mode === 'forward' : this.floaters.some(f => f.obj === target);
-      const g = new Marker({ mode: floating ? 'forward' : 'down', radius: 0.25, height: 0.36, gap: 0.04 });
-      g.scale.setScalar(floating ? 0.26 : 0.18);
+      target.updateWorldMatrix(true, true);
+      const box = new THREE.Box3().setFromObject(target), size = box.getSize(V()), center = box.getCenter(V());
+      if (box.isEmpty()) { size.set(0.06, 0.06, 0.06); center.copy(wp(target)); }
+      const foot = Math.max(size.x, size.z) / 2;
+      // ring radius ~ the kit's drawn circle (0.36 of a plane 2.8 x radius wide) clears the object by a few cm
+      const radius = THREE.MathUtils.clamp((floating ? Math.max(foot, size.y / 2) : foot) * 1.15 + 0.03, 0.05, 0.35);
+      const height = floating ? 0 : size.y + 0.02;                          // 'down': arrow tip just above the top (it bobs up 5 cm)
+      const g = new Marker({ mode: floating ? 'forward' : 'down', radius, height, gap: 0.03 });
+      g.arrow.scale.setScalar(0.32);                                         // an ~11 cm arrow instead of the demo's 34 cm
       g.traverse(o => { if (o.isMesh) { o.material.toneMapped = false; o.renderOrder = 5; } });
       this.scene.add(g);
-      return { obj: g, target, off: t.off || V(0, 0, 0), floating };
+      // anchor: footprint centre on the bottom (down) or the middle (forward), kept relative to the object as it moves
+      const anchor = floating ? center : V(center.x, box.isEmpty() ? center.y : box.min.y + 0.012, center.z);   // +1 cm: rounded models dip into the desk
+      return { obj: g, target, rel: anchor.sub(wp(target)), floating };
     });
   }
 
@@ -919,8 +930,8 @@ export class Flow {
     this.later(1.0, () => { this.tween(1.6, k => this.fire?.setLevel(0.12 + 0.88 * ease.out(k))); this.fx.emit(L.chimney, { color: '#ffb35a', count: 50, speed: 0.6, gravity: -0.4, life: 1.0 }); });
     const P = this.santaPath;
     if (!this.santa || !P) { this.later(1.0, () => this.showEmotionBook()); return; }      // no santa.js: straight to the book
-    this.camLook = P.doorLook;                                                // PC: the view turns to the door
-    this.later(1.4, () => { this.knock(); this.setHint('똑똑, 누가 왔나 봐요', this.renderer.xr.isPresenting ? '오른쪽 앞의 문을 봐주세요.' : ''); });
+    // no automatic camera here: the player turns to the door (and to Nicolas) themselves, on PC and in VR
+    this.later(1.4, () => { this.knock(); this.setHint('똑똑, 누가 왔나 봐요', this.renderer.xr.isPresenting ? '오른쪽 앞의 문을 봐주세요.' : '오른쪽 앞의 문을 봐주세요. (오른쪽 버튼을 누른 채 끌어서 둘러보기)'); });
     this.later(2.6, () => this.openDoor());
   }
   openDoor() {
@@ -965,11 +976,7 @@ export class Flow {
     const m = T.panel.mesh, s0 = m.scale.clone();
     this.tween(0.35, k => m.scale.set(s0.x, s0.y * Math.max(0.05, 1 - k), s0.z), () => m.removeFromParent());
     this.santa.talk(false); this.santa.wave(false); this.santa.setExpression('happy');
-    this.camLook = null;
-    if (this.view && !this.renderer.xr.isPresenting) {                       // PC: back to the work desk view
-      const [y0, p0] = this.view.get(), [y1, p1] = this.view.home, dy = Math.atan2(Math.sin(y1 - y0), Math.cos(y1 - y0));
-      this.tween(1.0, k => { const e = ease.inOut(k); this.view.set(y0 + dy * e, p0 + (p1 - p0) * e); });
-    }
+    this.camLook = null;                                                     // the view stays where the player left it
     this.later(0.6, () => this.showEmotionBook());
     // then he steps aside (toward the door) so the fireplace and the desk stay clear, and keeps watching you work
     this.later(1.4, () => { this.santaWalking = true;
@@ -1615,7 +1622,7 @@ export class Flow {
     for (const m of this.markers) {
       if (!m.target.parent || m.target.visible === false) { m.obj.visible = false; continue; }
       if (m.target.userData.holder) { m.obj.visible = false; continue; }    // in a hand: the job is done
-      m.obj.visible = true; m.obj.position.copy(wp(m.target, m.off)); m.obj.update(dt, this.camera);
+      m.obj.visible = true; m.obj.position.copy(wp(m.target)).add(m.rel); m.obj.update(dt, this.camera);
     }
     this.updateGuide(dt, vq);
     // VR hint panel follows lazily, a bit above the view
