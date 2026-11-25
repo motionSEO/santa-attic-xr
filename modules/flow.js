@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 // chalkboard UI kit (rush-xr-ui): Santa's dialogue board, the ingredient marker (ring + arrow) and the hand-motion guide
-import { DialoguePanel, GuidePanel, Marker } from './rush-xr-ui.js';
+import { DialoguePanel, GuidePanel, Marker, boardTexture, UI_FONT, fontReady } from './rush-xr-ui.js';
 import { createHandLetter } from './hand-letter.js';
 
 // ------------------------------------------------------------------ data (from the original game)
@@ -350,9 +350,41 @@ const PH = {
   talkPanel() {
     const board = new DialoguePanel({ speed: 20 });
     const S = 1.55;                                      // the kit's board is 0.46 m wide; a bit bigger to read above Santa
+    const BW = 0.46, BH = 0.46 * 661 / 1550;
     board.scale.setScalar(S);
-    board.traverse(o => { if (o.isMesh) { o.material.depthTest = false; o.material.toneMapped = false; o.renderOrder = o.renderOrder < 0 ? 10 : 11; } });
-    const panel = { mesh: board, w: 0.46, h: 0.46 * 661 / 1550, board, hitUV: () => 'next' };
+    // chalk text on a transparent canvas (the kit's look: off-white strokes, a few specks rubbed out)
+    const chalkText = (w, h, px, draw) => {
+      const c = document.createElement('canvas'); c.width = px; c.height = Math.round(px * h / w);
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+      const paint = (...a) => { const g = c.getContext('2d'); g.clearRect(0, 0, c.width, c.height); g.fillStyle = g.strokeStyle = '#f3f1ea'; g.lineJoin = 'round'; draw(g, c, ...a); tex.needsUpdate = true; };
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+      return { mesh: m, paint };
+    };
+    // name tag: a small chalkboard sticking out of the top-left corner with the speaker's name (니콜라스)
+    const TW = 0.15, TH = 0.05;
+    const tag = new THREE.Mesh(new THREE.PlaneGeometry(TW, TH), new THREE.MeshBasicMaterial({ map: boardTexture(512, TH / TW, { inset: 22, chamfer: 26, width: 9 }), alphaTest: 0.5, depthWrite: false }));
+    tag.position.set(-BW / 2 + TW / 2 + 0.02, BH / 2 - 0.004, 0.002); board.add(tag);
+    const name = chalkText(TW, TH, 512, (g, c, txt = OPENING.name) => {
+      g.font = `700 ${Math.round(c.height * 0.44)}px ${UI_FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.lineWidth = 2; g.strokeText(txt, c.width / 2, c.height * 0.54); g.fillText(txt, c.width / 2, c.height * 0.54);
+    });
+    name.mesh.position.set(tag.position.x, tag.position.y, 0.003); board.add(name.mesh);
+    // "▼ 다음" in chalk at the bottom right, blinking once the line is fully written (last line: "▼ 레시피북 펼치기")
+    const next = chalkText(0.16, 0.03, 512, (g, c, txt = '▼ 다음') => {
+      g.font = `${Math.round(c.height * 0.62)}px ${UI_FONT}`; g.textAlign = 'right'; g.textBaseline = 'middle';
+      g.lineWidth = 1.5; g.strokeText(txt, c.width - 6, c.height / 2); g.fillText(txt, c.width - 6, c.height / 2);
+    });
+    next.mesh.position.set(BW / 2 - 0.08 - 0.03, -BH / 2 + 0.036, 0.003); next.mesh.visible = false; board.add(next.mesh);
+    name.paint(); next.paint(); fontReady.then(() => { name.paint(); next.paint(); });
+    board.traverse(o => { if (o.isMesh) { o.material.depthTest = false; o.material.toneMapped = false; o.renderOrder = o.renderOrder < 0 ? 10 : (o === tag ? 12 : o === name.mesh || o === next.mesh ? 13 : 11); } });
+    let nextLabel = '';
+    const panel = { mesh: board, w: BW, h: BH, board, hitUV: () => 'next',
+      // per frame: show / blink the "next" cue when the line is done
+      cue(done, last, t) {
+        const label = last ? '▼ 레시피북 펼치기' : '▼ 다음';
+        if (label !== nextLabel) { nextLabel = label; next.paint(label); }
+        next.mesh.visible = done; next.mesh.material.opacity = 0.55 + 0.45 * Math.abs(Math.sin(t * 3));
+      } };
     board.userData.panel = panel;
     return panel;
   }
@@ -990,6 +1022,7 @@ export class Flow {
       const B = T.panel.board;
       if (T.said !== T.i) { T.said = T.i; B.say(OPENING.lines[T.i] || ''); }
       B.update(dt);                                                          // santa.js makes the talking blips itself
+      T.panel.cue(B.done, T.i === OPENING.lines.length - 1, performance.now() / 1000);
       S.talk(!B.done);
       const m = T.panel.mesh, p = S.object.position;
       const toHead = V(head.x - p.x, 0, head.z - p.z).normalize();
