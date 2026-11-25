@@ -147,7 +147,7 @@ function createSanta(THREE, opts = {}) {
     });
   }
   function setExpression(name) { if (EXPR[name]) expr = name; }
-  function talk(on = true) { st.talking = on; }
+  function talk(on = true, { voice = false } = {}) { st.talking = on; st.voiced = on && voice; }   // voice: a recorded voice is playing, no blips
   function wave(on = true) { st.waving = on; }
   function stop() { st.walkTask?.resolve(); st.walkTask = null; st.walking = false; }
 
@@ -221,7 +221,7 @@ function createSanta(THREE, opts = {}) {
     // mouth: talking flaps on top of expression
     const flap = st.talking ? Math.abs(Math.sin(t * 18)) * 0.9 : 0;
     mouth.scale.set(cur[4], cur[5] + flap, 0.5);
-    if (st.talking && Math.sin(t * 18) > 0.98) tone(520 + Math.random() * 120, 0.04, "square", 0.03);
+    if (st.talking && !st.voiced && Math.sin(t * 18) > 0.98) tone(520 + Math.random() * 120, 0.04, "square", 0.03);
   }
 
   function dispose() {

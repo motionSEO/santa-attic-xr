@@ -20,7 +20,12 @@ export const OPENING = {
   name: '니콜라스',
   // the lines exactly as the rush-xr-ui dialogue asset gives them
   lines: ['Hi, I’m Santa. This year, let’s make Christmas a little special.', 'Pick a feeling you want to send to a stranger.',
-    'Grab the fairy sugar and star dust first, then gather the rest.', 'Wrap it up and drop it in the magic basin with your letter.']
+    'Grab the fairy sugar and star dust first, then gather the rest.', 'Wrap it up and drop it in the magic basin with your letter.'],
+  // Nicolas's recorded voice for those lines, and where each line starts / ends in it (seconds; read from the pauses
+  // in the recording). The bubble moves to the next line when the voice gets there, and closes after the last one.
+  voice: 'Sound/Voice/santa_voice1.mp3',
+  cues: [[0, 4.92], [5.40, 7.61], [8.05, 12.21], [12.59, 16.12]],
+  hold: 1.2            // seconds the last line stays up after the voice ends
 };
 export const ING = {
   fairySugar: { name: '요정설탕', real: '베이킹 소다', location: 'shelf', action: 'pour', color: '#f4f1ff', base: true },
@@ -956,7 +961,13 @@ export class Flow {
     const S = this.santa;
     const panel = PH.talkPanel();
     this.scene.add(panel.mesh); this.panels.push(panel);
-    this.talk = { panel, i: 0, said: -1 };
+    this.talk = { panel, i: 0, said: -1, t0: performance.now() / 1000 };
+    // the voice: its clock drives the lines (falls back to a plain clock with the same cues if it can't play)
+    const file = this.manifest?.sounds?.voice || OPENING.voice;
+    if (file && OPENING.cues?.length) {
+      try { const a = this.talk.voice = new Audio(file); a.volume = 1; a.play().catch(() => { this.talk && (this.talk.voice = null); }); }
+      catch (e) { this.talk.voice = null; }
+    }
     S.setExpression('happy'); S.wave(true);
     this.setHint('니콜라스의 인사', this.renderer.xr.isPresenting ? '트리거를 당기거나 엄지와 검지로 집으면 다음 대사로 넘어가요.' : '클릭하거나 Space를 누르면 다음 대사로 넘어가요.');
   }
@@ -967,11 +978,15 @@ export class Flow {
     if (!B.done) { B.skip(); return; }                                       // first press: finish typing the line
     this.sfx('click');
     T.i++;
+    const cue = OPENING.cues?.[T.i];                                          // skipping ahead: the voice jumps to that line too
+    if (cue) { if (T.voice) T.voice.currentTime = cue[0]; else T.t0 = performance.now() / 1000 - cue[0]; }
+    else if (T.voice) T.voice.pause();
     if (T.i === 1) this.santa.wave(false);                                    // waves on the greeting only
     if (T.i >= OPENING.lines.length) this.endTalk();
   }
   endTalk() {
-    const T = this.talk; this.talk = null;
+    const T = this.talk; if (!T) return; this.talk = null;
+    T.voice?.pause();
     this.panels = this.panels.filter(p => p !== T.panel);
     const m = T.panel.mesh, s0 = m.scale.clone();
     this.tween(0.35, k => m.scale.set(s0.x, s0.y * Math.max(0.05, 1 - k), s0.z), () => m.removeFromParent());
@@ -996,9 +1011,19 @@ export class Flow {
     if (!S.object.visible) return;
     if (T) {
       const B = T.panel.board;
+      const cues = OPENING.cues;
+      if (cues?.length) {                                                    // voiced: the recording sets the pace
+        const now = performance.now() / 1000;
+        if (T.voice?.ended) T.endT ??= now;                                  // after the recording ends its clock stops: keep counting
+        const vt = !T.voice ? now - T.t0 : T.voice.ended ? T.voice.duration + now - T.endT : T.voice.currentTime;
+        while (T.i < cues.length - 1 && vt >= cues[T.i + 1][0]) { T.i++; if (T.i === 1) S.wave(false); }
+        const cue = cues[T.i];
+        S.talk(!!cue && vt >= cue[0] && vt < cue[1], { voice: !!T.voice });  // mouth moves while he speaks (no blips over the voice)
+        if (T.i === cues.length - 1 && vt >= cue[1] + (OPENING.hold ?? 1) && !T.closing) { T.closing = true; this.later(0, () => this.endTalk()); }
+      }
       if (T.said !== T.i) { T.said = T.i; B.say(OPENING.lines[T.i] || ''); }
-      B.update(dt);                                                          // santa.js makes the talking blips itself
-      S.talk(!B.done);
+      B.update(dt);
+      if (!cues?.length) S.talk(!B.done);                                    // no voice: santa.js makes the talking blips itself
       const m = T.panel.mesh, p = S.object.position;
       // beside his face, on the player's right: the board's near edge just clears his head (head radius ~0.25 m)
       const face = S.parts?.head ? wp(S.parts.head) : V(p.x, p.y + 1.6, p.z);
