@@ -40,6 +40,7 @@
 - `modules/mug.js` 코코아 머그 (김, 마시기, 다시 채우기)
 - `modules/flow.js` 체험 흐름 전체 (단계, 임시 오브젝트, 책/편지 UI, 에셋 교체)
 - `modules/santa.js` 산타(니콜라스) 캐릭터 원본 모듈 `createSanta(THREE)`: walkTo, turnTo, wave, talk, setExpression. 단독 테스트는 `santa-test.html`. 오프닝 대사는 `flow.js` 맨 위 `OPENING`, 멈추는 자리는 `L.santa`
+- `modules/recipe-book/` LUSH 레시피북 모듈(받은 그대로): 펼치기 애니메이션, 감정 페이지, 레시피 페이지와 재료 줄긋기. `flow.js`의 `loadRecipeBook()`이 기존 책 자리에 넣어요
 - `modules/hand-letter.js` 09 손편지 (손 추적·컨트롤러·마우스로 연필 쓰기, 지우기/보내기, 각도·이동 손잡이)
 - `ASSETS.md`, `assets/*.example.json` 에셋 전달 형식과 교체 설정 예시
 - `herb-test.html`, `mug-test.html`, `drawer-test.html`, `snowglobe-test.html` 모듈 단독 테스트 페이지

@@ -1,0 +1,17 @@
+{
+  "name": "lush-recipe-book",
+  "version": "1.0.0",
+  "description": "LUSH Recipe Book — three.js module (opening animation, emotion picker, recipe pages, ingredient quests)",
+  "type": "module",
+  "main": "src/RecipeBook.js",
+  "scripts": {
+    "dev": "vite --open /example/"
+  },
+  "peerDependencies": {
+    "three": ">=0.160.0"
+  },
+  "devDependencies": {
+    "three": "^0.160.0",
+    "vite": "^5.4.0"
+  }
+}
