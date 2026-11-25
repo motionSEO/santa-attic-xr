@@ -615,13 +615,77 @@ export class Flow {
     const g = this.garden?.addGrabbable({
       object: obj, modes, reach, enabled,
       distance: (p) => new THREE.Box3().setFromObject(obj).distanceToPoint(p),
-      onGrab: (anchor, slot) => { this.stopTween(obj); this.unfloat(obj); obj.userData.holder = slot; anchor.attach(obj); this.onGrabbed(obj); },
+      onGrab: (anchor, slot) => { this.stopTween(obj); this.unfloat(obj); obj.userData.holder = slot; anchor.attach(obj); this.snapGrip(obj, slot); this.onGrabbed(obj); },
       onRelease: () => { this.scene.attach(obj); this.group.attach(obj); const h = obj.userData.holder; obj.userData.holder = null; this.onReleased(obj, h); },
       onMouseDown: () => { this.stopTween(obj); this.unfloat(obj); this.group.attach(obj); obj.userData.holder = 'mouse'; this.mouseObj = obj; this.tiltAmt = 0; this.onGrabbed(obj); },
       onMouseUp: () => { if (this.mouseObj === obj) this.mouseObj = null; obj.userData.holder = null; this.onReleased(obj, 'mouse'); }
     });
     obj.userData.g = g; this.grabs.push(obj);
     return g;
+  }
+  // ---------------------------------------------------------------- grip poses (VR): tools sit in the hand the right way
+  // Wherever a tool is taken, it settles into a proper grip: the knife in a cutting grip (blade forward and a bit down, edge
+  // down), the pestle in a fist with its head down, bottles and the sprinkle shaker upright in the fist. Hands and controllers.
+  gripKind(o) {
+    if (o === this.knife) return 'knife';
+    if (o === this.pestle) return 'pestle';
+    if (Object.values(this.bottles).includes(o) || (o === this.decorObj && this.s.recipe?.decor.mode === 'sprinkle')) return 'bottle';
+    return null;
+  }
+  // the hand as three directions: u = thumb side (up in a fist held thumb-up), f = where the fingers point, p = out of the palm
+  handBasis(s) {
+    const J = s.hand?.joints, w = J?.wrist, k = J?.['index-finger-phalanx-proximal'], pk = J?.['pinky-finger-phalanx-proximal'];
+    if (s.isHand && w && k && pk) {
+      const pw = wp(w), pkn = wp(k), ppk = wp(pk);
+      const f = pkn.clone().sub(pw).normalize(), a = ppk.sub(pkn);
+      const u = a.addScaledVector(f, -a.dot(f)).normalize().negate();
+      const p = s.handedness === 'left' ? f.clone().cross(u) : u.clone().cross(f);
+      return { o: (s.palm || pkn).clone(), u, f, p, hand: true };
+    }
+    // controller: up out of the top of the fist, forward along the pointing direction
+    const g = s.grip; g.updateWorldMatrix(true, false);
+    const q = g.getWorldQuaternion(new THREE.Quaternion());
+    const u = V(0, 1, 0).applyQuaternion(q), f = V(0, 0, -1).applyQuaternion(q), p = V(-1, 0, 0).applyQuaternion(q);
+    return { o: wp(g), u, f, p, hand: false };
+  }
+  snapGrip(obj, slot) {
+    const kind = this.gripKind(obj); if (!kind || !slot || slot === 'mouse' || slot.connected === undefined) return;
+    const B = this.handBasis(slot), { u, f, p } = B;
+    const scale = obj.getWorldScale(V());
+    // the object's own (unscaled) shape: where the hand holds it, and how it is laid out
+    obj.updateWorldMatrix(true, true);
+    const inv = obj.matrixWorld.clone().invert(), lb = new THREE.Box3(), m4 = new THREE.Matrix4();
+    obj.traverse(m => { if (m.isMesh && m.geometry && m !== obj.userData.hitProxy) { m.geometry.boundingBox || m.geometry.computeBoundingBox(); lb.union(m.geometry.boundingBox.clone().applyMatrix4(m4.multiplyMatrices(inv, m.matrixWorld))); } });
+    if (lb.isEmpty()) return;
+    const deg = THREE.MathUtils.degToRad, grip = V(), X = V(), Y = V(), Z = V();
+    let r = 0.012;
+    if (kind === 'knife') {            // blade (local -x) forward and slightly up out of the thumb side, edge (local -z) down
+      const A = deg(65), blade = u.clone().multiplyScalar(Math.cos(A)).addScaledVector(f, Math.sin(A)).normalize();
+      const edge = u.clone().multiplyScalar(-Math.sin(A)).addScaledVector(f, Math.cos(A)).normalize();
+      X.copy(blade).negate(); Z.copy(edge).negate(); Y.crossVectors(Z, X);
+      grip.set(lb.max.x - 0.045, (lb.min.y + lb.max.y) / 2, (lb.min.z + lb.max.z) / 2); r = 0.01;
+    } else if (kind === 'pestle') {    // head (local y = 0) down out of the little-finger side, handle (+y) up through the fist
+      const A = deg(20), head = u.clone().multiplyScalar(-Math.cos(A)).addScaledVector(f, Math.sin(A)).normalize();
+      Y.copy(head).negate(); Z.copy(p).addScaledVector(Y, -p.dot(Y)).normalize(); X.crossVectors(Y, Z);
+      grip.set((lb.min.x + lb.max.x) / 2, lb.min.y + (lb.max.y - lb.min.y) * 0.72, (lb.min.z + lb.max.z) / 2); r = 0.014;
+    } else {                           // bottle / shaker: upright in the fist, label toward you
+      Y.copy(u); Z.copy(f).negate(); X.crossVectors(Y, Z);
+      grip.set((lb.min.x + lb.max.x) / 2, lb.min.y + (lb.max.y - lb.min.y) * 0.42, (lb.min.z + lb.max.z) / 2);
+      r = (lb.max.x - lb.min.x) * scale.x / 2;
+    }
+    const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
+    // the handle runs through the closed hand: a little in front of the palm centre, toward the curled fingers
+    const at = B.o.clone(); if (B.hand) at.addScaledVector(p, r + 0.012).addScaledVector(f, 0.01);
+    const pos = at.sub(grip.multiply(scale).applyQuaternion(q));
+    // into the fist anchor (it follows the palm and the wrist), settling there over a moment
+    const anchor = slot.fistAnchor || obj.parent; anchor.attach(obj); anchor.updateWorldMatrix(true, false);
+    const aInv = anchor.matrixWorld.clone().invert(), aq = anchor.getWorldQuaternion(new THREE.Quaternion()).invert();
+    const p1 = pos.applyMatrix4(aInv), q1 = aq.multiply(q), p0 = obj.position.clone(), q0 = obj.quaternion.clone();
+    this.tween(0.16, k => {
+      if (obj.parent !== anchor) return;
+      if (this.garden?.pulls) this.garden.pulls = this.garden.pulls.filter(x => x.obj !== obj);   // no ray pull-in on top of the grip
+      const e = ease.out(k); obj.position.lerpVectors(p0, p1, e); obj.quaternion.slerpQuaternions(q0, q1, e);
+    }, null, obj);
   }
   // small things (vanilla pods, petals, pens) get an invisible, finger/mouse-sized hit box
   addHitProxy(obj, min = 0.05) {
