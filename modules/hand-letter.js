@@ -13,6 +13,7 @@
 //   santa-attic-xr 에 넣으면서 바꾼 것 (demo.html 원본과 다른 점):
 //   · ES 모듈로 export (HandLetter, createHandLetter)
 //   · PC: 왼쪽 버튼만 가로챈다 (오른쪽 끌기 = 둘러보기는 게임에 그대로)
+//   · 부모(리그)가 돌아가 있어도 편지지가 나를 향하게 놓음
 //   · 퀘스트 컨트롤러: 손 추적이 없을 때 컨트롤러를 가상의 손으로 (트리거 = 꼬집기, 그립 = 쥐기)
 //   편지는 저장·전송하지 않는다. 필요하면 getImage() 로 PNG 를 직접 받아 쓰면 된다.
 import * as THREE from 'three';
@@ -843,7 +844,9 @@ export function createHandLetter(o) {
     world.y = _hd.y - 0.1;
     parent.updateMatrixWorld();
     anchor.position.copy(parent.worldToLocal(world));
-    anchor.rotation.set(0, Math.atan2(-_fw.x, -_fw.z), 0);
+    // 월드 기준으로 나를 향하게 (부모가 돌아가 있어도 — 예: VR 리그의 방향)
+    anchor.quaternion.setFromAxisAngle(_Y, Math.atan2(-_fw.x, -_fw.z))
+      .premultiply(parent.getWorldQuaternion(new THREE.Quaternion()).invert());
     anchor.updateMatrixWorld();
     setFloor();
     if (xr()) return;

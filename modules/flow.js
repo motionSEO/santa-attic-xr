@@ -1554,7 +1554,17 @@ export class Flow {
       if (this.wrapGrab) { if (!this.wrapGrab.pinch) this.wrapGrab = null; else if (this.wrapGrab.point.distanceTo(wp(this.bomb)) < 0.1) this.coverWrap(); }
     }
     // hand letter (09): its own pencil, hands / controllers / mouse
-    this.handLetter?.update(dt);
+    if (this.handLetter) {
+      // PC: the view looks down at the workbench, so the paper would sink into the desk. Draw it over the room like UI.
+      // VR: normal depth, so your own hands stay in front of the paper.
+      const overlay = !this.renderer.xr.isPresenting, L2 = this.handLetter.letter;
+      if (L2.overlay !== overlay) {
+        L2.overlay = overlay;
+        for (const o of [L2.paper, L2.pencil]) o.traverse((m) => { if (m.isMesh && m !== L2.cursor) { m.material.depthTest = !overlay; m.material.needsUpdate = true; } });
+        for (const h of L2.handles) h.mesh.material.depthTest = !overlay;
+      }
+      this.handLetter.update(dt);
+    }
   }
 }
 
