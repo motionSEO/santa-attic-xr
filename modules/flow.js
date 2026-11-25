@@ -1096,6 +1096,15 @@ export class Flow {
   // desk, rises in front of you when Nicolas is done and goes back to the desk when gathering starts, exactly as before.
   async loadRecipeBook() {
     try {
+      // The module reads its page images back from a canvas. When a host serves those files from another origin
+      // (raw.githack.com redirects big files to raw.githubusercontent.com) the canvas would be tainted and the book
+      // fails to build. So its images are requested with CORS (both hosts allow it); the module itself is untouched.
+      if (!HTMLImageElement.prototype.__rbCors) {
+        const d = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+        Object.defineProperty(HTMLImageElement.prototype, 'src', { configurable: true, get() { return d.get.call(this); },
+          set(v) { if (typeof v === 'string' && v.includes('recipe-book/assets/') && !this.crossOrigin) this.crossOrigin = 'anonymous'; d.set.call(this, v); } });
+        HTMLImageElement.prototype.__rbCors = true;
+      }
       const rb = await createRecipeBook({ renderer: this.renderer, assetsUrl: 'modules/recipe-book/assets/' });
       this.rb = rb;
       rb.object.scale.setScalar(RB_SCALE);
@@ -1103,7 +1112,12 @@ export class Flow {
       this.book.add(rb.object);
       rb.on('change', (st) => this.onBookChange(st));
       if (['emotion', 'recipe'].includes(this.s.step)) rb.openInstant();     // loaded late: catch up
-    } catch (e) { console.warn('recipe book module:', e); this.rbFailed = true; this.setHint('레시피북을 불러오지 못했어요', '인터넷 연결을 확인하고 페이지를 새로고침해주세요.', '#ff9a8a'); }
+    } catch (e) {                                                            // never the placeholder book: try again
+      console.warn('recipe book module:', e);
+      this.rbTries = (this.rbTries || 0) + 1;
+      if (this.rbTries < 5) setTimeout(() => this.loadRecipeBook(), 2000);
+      else { this.rbFailed = true; this.setHint('레시피북을 불러오지 못했어요', '인터넷 연결을 확인하고 페이지를 새로고침해주세요.', '#ff9a8a'); }
+    }
   }
   bookNormal() { return V(0, 1, 0).applyQuaternion(this.book.getWorldQuaternion(new THREE.Quaternion())); }
   // a fingertip (VR) on the emotion page: a short ray from just above the tip down onto the page
