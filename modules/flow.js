@@ -993,8 +993,12 @@ export class Flow {
       B.update(dt);                                                          // santa.js makes the talking blips itself
       S.talk(!B.done);
       const m = T.panel.mesh, p = S.object.position;
-      const toHead = V(head.x - p.x, 0, head.z - p.z).normalize();
-      m.position.set(p.x, p.y + 1.82, p.z).addScaledVector(toHead, 0.25);
+      // beside his face, on the player's right: the board's near edge just clears his head (head radius ~0.25 m)
+      const face = S.parts?.head ? wp(S.parts.head) : V(p.x, p.y + 1.6, p.z);
+      const toHead = V(head.x - face.x, 0, head.z - face.z).normalize();
+      const right = V(toHead.z, 0, -toHead.x);                               // the player's right, seen from the player
+      const half = T.panel.w * m.scale.x / 2;
+      m.position.copy(face).addScaledVector(right, 0.28 + half).addScaledVector(toHead, 0.15);
       m.lookAt(head);
     }
     // head follows the player once he is inside (during the walk he looks where he goes)
