@@ -692,13 +692,12 @@ export class Flow {
       if (e.target.tagName === 'INPUT' || e.repeat) return;
       if (e.code === 'Space') { e.preventDefault(); this.action(); }
       if (e.code === 'KeyR') this.tiltKey = true;
-      if (e.code === 'Enter' && this.s.step === 'dark') this.begin();
-      else if (e.code === 'Enter' && this.s.step === 'intro') this.advanceTalk();
+      if (e.code === 'Enter' && this.s.step === 'intro') this.advanceTalk();   // the game itself starts only from the title screen's button
     });
     addEventListener('keyup', (e) => { if (e.code === 'KeyR') this.tiltKey = false; });
     c.addEventListener('pointerdown', (e) => {
       if (this.renderer.xr.isPresenting) return;
-      if (this.s.step === 'dark') { this.begin(); return; }
+      if (this.s.step === 'dark') return;                                // waiting on the title screen
       if (e.button !== 0) return;
       if (this.s.step === 'intro') { this.advanceTalk(); return; }      // opening: a click anywhere = next line
       const r = c.getBoundingClientRect(), ndc = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
