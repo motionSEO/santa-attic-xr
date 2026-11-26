@@ -40,17 +40,19 @@
   #cross { position:fixed; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; z-index:9;
     border-radius:50%; background:rgba(255,230,200,.85); box-shadow:0 0 0 1.5px rgba(0,0,0,.45); display:none; pointer-events:none; }
   body.locked #cross { display:block; }
-  /* title screen: the game waits here until 시작하기 is pressed (the room keeps loading / shows dimly behind it) */
-  #start { position:fixed; inset:0; z-index:15; display:grid; place-content:center; justify-items:center; text-align:center; gap:14px;
-    padding:24px 16px; background:radial-gradient(ellipse at center, rgba(28,16,10,.78), rgba(6,5,4,.94)); }
-  #start small { font-size:12px; letter-spacing:.32em; color:#d98c3a; font-weight:600; }
-  #start h1 { margin:0; font-size:clamp(26px, 6vw, 44px); font-weight:700; color:#ffd9a8; line-height:1.2; letter-spacing:.01em; }
-  #start p { margin:0; color:#c9c0b2; font-size:14px; line-height:1.6; max-width:420px; }
-  #start button { margin-top:10px; padding:13px 44px; font:inherit; font-size:17px; font-weight:700; color:#2a1608; cursor:pointer;
-    background:#ffd9a8; border:0; border-radius:999px; box-shadow:0 6px 24px rgba(217,140,58,.35); transition:transform .15s, background .15s; }
-  #start button:hover { background:#ffe6c4; transform:translateY(-1px); }
-  #start button:disabled { background:#5a4636; color:#c9b8a4; cursor:wait; box-shadow:none; transform:none; }
-  #start span { color:#8f8577; font-size:12px; max-width:420px; line-height:1.6; }
+  /* title screen: black with only the logo while the room loads; once it is ready the START button fades in and the room shows dimly behind */
+  #start { position:fixed; inset:0; z-index:25; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:clamp(18px, 4vh, 40px);
+    padding:24px 16px; background:#000; transition:background 1.2s ease; }
+  #start.ready { background:rgba(0,0,0,.5); }
+  #start .logo { width:clamp(220px, 36vw, 480px); max-height:52vh; object-fit:contain; margin-top:-4vh; user-select:none; pointer-events:none;
+    filter:drop-shadow(0 4px 18px rgba(0,0,0,.45)); }
+  #start button { padding:0; border:0; background:none; cursor:pointer; opacity:0; visibility:hidden; transform:translateY(6px);
+    transition:opacity .9s ease .3s, transform .9s ease .3s, visibility 0s linear .3s; }
+  #start button img { display:block; width:clamp(120px, 15vw, 200px); user-select:none; pointer-events:none; transition:transform .15s; }
+  #start.ready button { opacity:1; visibility:visible; transform:none; }
+  #start button:hover img { transform:scale(1.04); }
+  #start button:disabled { cursor:wait; }
+  #loading { display:none !important; }   /* the title screen is the loading screen now */
   body.locked #start, body.started #start, body.xr #start { display:none; }
   body:not(.started):not(.xr) #hud { display:none; }   /* settings panel appears once the game has started */
   body.locked #hud { opacity:.35; pointer-events:none; }
@@ -84,11 +86,8 @@
   </div>
 </div>
 <div id="start">
-  <small>LUSH SANTA</small>
-  <h1>Dear Stranger,<br>from Santa</h1>
-  <p>산타 마을의 작업실에서 마음을 담은 배쓰밤을 만들어<br>이름 모를 누군가에게 선물해요.</p>
-  <button id="startBtn" type="button" disabled>작업실 준비 중…</button>
-  <span>제자리에서 체험해요 · 오른쪽 버튼을 누른 채 끌면 둘러보고, 왼쪽 클릭으로 물건을 만져요</span>
+  <img class="logo" src="assets/ui/dear-stranger-logo.png" alt="Dear Stranger">
+  <button id="startBtn" type="button" disabled aria-label="시작하기"><img src="assets/ui/start-button.png" alt="START"></button>
 </div>
 <div id="cross"></div>
 <div id="toast"></div>
@@ -323,7 +322,7 @@ startBtn.addEventListener('click', () => {
   if (vrOK && vb && !renderer.xr.isPresenting) { vb.click(); return; }   // same click = the user gesture the headset needs
   window.__flow.begin();
 });
-const startReady = setInterval(() => { if (window.__flow) { clearInterval(startReady); startBtn.disabled = false; startBtn.textContent = '시작하기'; } }, 300);
+const startReady = setInterval(() => { if (window.__flow) { clearInterval(startReady); startBtn.disabled = false; startEl.classList.add('ready'); } }, 300);
 document.addEventListener('pointerlockchange', () => document.body.classList.toggle('locked', locked()));
 document.addEventListener('mousemove', e => {
   if (!locked()) return;
