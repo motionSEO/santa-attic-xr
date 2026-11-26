@@ -813,6 +813,10 @@ export class Flow {
     return list;
   }
   onClick(ray) {
+    if (this.basin && ['basin', 'melting', 'end', 'farewell'].includes(this.s.step)) {   // PC: a click on the basin water splashes
+      const h = ray.intersectObject(this.basin.userData.placeholder.userData.water, false)[0];
+      if (h) { this.splashAt(h.point, 0.7); return true; }
+    }
     if (this.rb && this.s.step === 'emotion' && this.rb.pickFromRay(ray)) { this.sfx('click'); return true; }
     const hits = ray.intersectObjects(this.clickables(), true); if (!hits.length) return false;
     return this.clickHit(hits[0], 'mouse');
@@ -1003,7 +1007,7 @@ export class Flow {
     const g = this.guide;
     if (!name) { g.visible = false; this.guideName = null; return; }
     if (name !== this.guideName) { this.guideName = name; g.play(name); g.userData.placed = false; }
-    g.visible = !!this.guideTarget();                                        // only ever over the thing to use, never in front of the view
+    g.visible = true;
   }
   // the thing the current motion is done with: the next bottle (or the mortar while a bottle is in hand), the next drawer,
   // the pestle (the mortar once it is in hand), the mold
@@ -1018,13 +1022,13 @@ export class Flow {
   }
   updateGuide(dt) {
     const g = this.guide; if (!g || !this.guideName) return;
-    const t = this.guideTarget(); g.visible = !!(t && t.parent && t.visible !== false && !this.held(t));
+    g.visible = !!(this.santa?.object.visible);
     if (!g.visible) return;
     g.update(dt);
-    const S = 0.42; g.scale.setScalar(S);
-    // right over the target, just clear of the marker arrow bobbing above it
-    const box = new THREE.Box3().setFromObject(t), c = box.getCenter(V());
-    const target = V(c.x, box.max.y + 0.17 + 0.27 * S / 2, c.z);
+    const S = 0.75; g.scale.setScalar(S);
+    // fixed right under Nicolas's speech bubble (where the bubble hangs, whether he is talking or not)
+    const bubbleH = 0.46 * 661 / 1550 * 1.55;
+    const target = this.bubbleSpot().add(V(0, -(bubbleH / 2 + 0.27 * S / 2 + 0.03), 0));
     if (!g.userData.placed || g.position.distanceTo(target) > 0.6) { g.userData.placed = true; g.position.copy(target); }
     g.position.lerp(target, 1 - Math.exp(-dt * 5));
     const head = this.headPos(); g.lookAt(head.x, g.position.y + (head.y - g.position.y) * 0.5, head.z);
@@ -1078,8 +1082,21 @@ export class Flow {
   knock() { if (this.sfx('knock')) return; this.tone(140, 0.12, 'triangle', 0.4); setTimeout(() => this.tone(140, 0.12, 'triangle', 0.4), 180); setTimeout(() => this.tone(150, 0.12, 'triangle', 0.4), 520); }
   creak() { if (this.sfx('door')) return; this.tone(180, 0.9, 'sawtooth', 0.025, 1.6); }
 
+  // the same view every time the game starts (also after Play Again): PC = the home view; VR = the headset is put on the
+  // standing spot facing the desk, wherever the player physically stands or faces
+  recenter() {
+    const rig = this.rig, cam = this.camera, home = this.view?.home || [Math.PI / 2, -0.95];
+    if (this.renderer.xr.isPresenting && rig) {
+      cam.updateMatrix();
+      const e = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ'), yaw = home[0] - e.y;
+      rig.rotation.set(0, yaw, 0);
+      const off = V(cam.position.x, 0, cam.position.z).applyAxisAngle(V(0, 1, 0), yaw);
+      rig.position.set(L.stand.x - off.x, rig.position.y, L.stand.z - off.z);
+    } else this.view?.set(home[0], home[1]);
+  }
   begin() {
     if (this.s.step !== 'dark') return;
+    this.recenter();
     this.s.step = 'intro'; this.setHint('', '');
     this.setupSanta();
     if (this.renderer.xr.isPresenting) this.toast('손이 닿지 않는 것은 손으로 가리킨 뒤 집으면 돼요');
@@ -1507,6 +1524,7 @@ export class Flow {
     this.fx.emit(c, { color: ING[id].color, count: 24, speed: 0.25, gravity: 0.8, life: 0.5 });
     this.ungrab(item); item.removeFromParent(); this.board.userData.item = null;
     if (item === this.fruits[id]) this.later(1.2, () => this.spawnFruit(id));
+    this.setMarkers([]);                                                     // the knife is done: its marker goes
     const making = ['base', 'naturals'].includes(this.s.step);     // after the making steps cutting still works, the step hints stay put
     if (ING[id].action === 'cutSqueeze') {
       [-1, 1].forEach((sgn, i) => {
@@ -1738,11 +1756,12 @@ export class Flow {
       hl.onBeforeSend = (png) => { this.letterImage = png; };
       hl.onSend = () => this.sfx('letter');
       hl.onDone = () => this.finishLetter();
+      hl.letter.onInk = () => Foley.press?.(wp(hl.letter.paper));   // a soft tap when a pen colour is picked
       hl.letter.handedOf = (i) => this.garden?.hands.find(s => s.hand === this.renderer.xr.getHand(i))?.handedness;   // pencil grip: which hand
     }
     this.letterImage = null;
     this.handLetter.show(); this.stageSay('letter', 7);
-    this.setHint('09 손편지', '편지지 옆의 연필을 집어(꼬집거나 쥐어서) 이름 모를 산타에게 편지를 써보세요. 다 쓰면 [보내기]를 잠시 누르고 있어요. 오른쪽 [각도], 아래 [이동] 손잡이로 편지지를 맞출 수 있어요. (PC: 종이 위에서 왼쪽 버튼을 누른 채 끌어서 쓰기)');
+    this.setHint('09 손편지', '편지지 옆의 연필을 집어(꼬집거나 쥐어서) 이름 모를 산타에게 편지를 써보세요. 다 쓰면 [보내기]를 잠시 누르고 있어요. 아래 색 동그라미로 펜 색을 고르고, 오른쪽 [각도] 손잡이로 편지지를 맞출 수 있어요. (PC: 종이 위에서 왼쪽 버튼을 누른 채 끌어서 쓰기)');
     this.setMarkers([]);
   }
   finishLetter() {
@@ -1768,10 +1787,14 @@ export class Flow {
     B.panel.board.update(dt);
     if (B.panel.board.done) S.talk(false);
     B.until -= dt; if (B.until <= 0) { B.panel.mesh.visible = false; S.talk(false); return; }
-    const head = this.headPos(), m = B.panel.mesh, p = S.object.position;
+    const m = B.panel.mesh; m.position.copy(this.bubbleSpot()); m.lookAt(this.headPos());
+  }
+  // where Nicolas's bubble hangs: beside his face on his other side (the shelf is on the right), a little above
+  bubbleSpot() {
+    const S = this.santa, head = this.headPos(), p = S.object.position;
     const face = S.parts?.head ? wp(S.parts.head) : V(p.x, p.y + 1.6, p.z);
     const toHead = V(head.x - face.x, 0, head.z - face.z).normalize(), right = V(toHead.z, 0, -toHead.x);
-    m.position.copy(face).addScaledVector(right, -(0.28 + B.panel.w / 2)).addScaledVector(toHead, 0.15); m.position.y += 0.1; m.lookAt(head);   // on his other side: the shelf and the motion guide are on the right
+    return face.addScaledVector(right, -(0.28 + 0.46 / 2)).addScaledVector(toHead, 0.15).add(V(0, 0.1, 0));
   }
   stageSay(key, secs = 6) { const t = STAGE_LINES[key]; if (t) this.santaSay(t, secs); }
   santaWalk(to, opts = {}) {
@@ -2089,6 +2112,45 @@ export class Flow {
     const d = this.drawers.find(x => x.item === o); if (d) d.item = null;
   }
 
+  // the basin water: hands moving through it splash (찰박찰박): droplets fly up, ripples of foam bits, a wet slap
+  basinPlay(dt) {
+    if (!this.basin || !['basin', 'melting', 'end', 'farewell'].includes(this.s.step)) return;
+    const water = this.basin.userData.placeholder.userData.water, wc = wp(water), R = 0.2;
+    for (const f of this.fingertips()) {
+      const s = f.slot, J = s.hand?.joints, pts = [f.p, s.palm].filter(Boolean);
+      for (const p of pts) {
+        const key = p === f.p ? '_wTip' : '_wPalm', last = s[key]; s[key] = p.clone();
+        if (!last) continue;
+        const inside = Math.hypot(p.x - wc.x, p.z - wc.z) < R && Math.abs(p.y - wc.y) < 0.035;
+        const v = p.distanceTo(last) / Math.max(dt, 1e-3);
+        if (inside && v > 0.25) this.splashAt(V(p.x, wc.y + 0.005, p.z), Math.min(1, v / 1.2));
+      }
+    }
+  }
+  splashAt(p, k = 0.6) {
+    if (performance.now() - (this.splashT || 0) < 90) return; this.splashT = performance.now();
+    this.fx.emit(p, { color: '#dff4ff', count: 8 + Math.round(14 * k), speed: 0.35 + 0.5 * k, gravity: 2.2, life: 0.6, dir: V(0, 1, 0), spread: 1.4 });
+    this.fx.emit(p, { color: '#ffffff', count: 6, speed: 0.12, gravity: 0, life: 0.5, dir: V(0, 0.15, 0), spread: 2 });
+    Foley.splash(p, k);
+  }
+
+  // does the knife's blade (not its handle) touch this thing? points along the blade, against the thing's box
+  bladeTouches(item) {
+    const k = this.knife;
+    if (!k.userData.bladeLen) {                                              // blade = the part on local -x (handle on +x)
+      const inv = k.matrixWorld.clone().invert(), lb = new THREE.Box3(), m4 = new THREE.Matrix4();
+      k.updateWorldMatrix(true, true);
+      k.traverse(m => { if (m.isMesh && m.geometry && m !== k.userData.hitProxy) { m.geometry.boundingBox || m.geometry.computeBoundingBox(); lb.union(m.geometry.boundingBox.clone().applyMatrix4(m4.multiplyMatrices(inv, m.matrixWorld))); } });
+      k.userData.bladeLen = Math.max(0.05, -lb.min.x); k.userData.bladeY = (lb.min.y + lb.max.y) / 2;
+    }
+    const box = new THREE.Box3().setFromObject(item).expandByScalar(0.006);
+    for (let i = 0; i <= 8; i++) {
+      const x = -0.015 - (k.userData.bladeLen - 0.02) * i / 8;
+      if (box.containsPoint(k.localToWorld(V(x, k.userData.bladeY, 0)))) return true;
+    }
+    return false;
+  }
+
   // ---------------------------------------------------------------- per frame
   update(dt, t) {
     dt = Math.min(dt, 0.05) * (window.__timeScale || 1);   // __timeScale: test hook (fast-forward the flow)
@@ -2165,7 +2227,7 @@ export class Flow {
 
     // continuous checks: pouring, sprinkling, knife, pestle, two-hand break, mortar into mold
     this.continuous(dt);
-    if (this.renderer.xr.isPresenting) this.updateTouch(dt);
+    if (this.renderer.xr.isPresenting) { this.updateTouch(dt); this.basinPlay(dt); }
     this.updateNotice(dt);
     this.fx.update(dt);
   }
@@ -2183,7 +2245,7 @@ export class Flow {
     }
     // knife touching what lies on the board (XR)
     if (this.held(this.knife) && this.knife.userData.holder !== 'mouse' && this.board.userData.item) {
-      if (wp(this.knife).distanceTo(wp(this.board.userData.item)) < 0.07) this.tryCut();
+      if (this.bladeTouches(this.board.userData.item)) this.tryCut();         // only the blade cuts, not the hand holding the knife
     }
     // XR: squeeze = make a fist over the mortar while holding a half / pieces
     for (const o of this.grabs) {
