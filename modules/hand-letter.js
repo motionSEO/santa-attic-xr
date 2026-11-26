@@ -54,6 +54,8 @@ const HANDLE_REACH = 0.1;
 const STORE_KEY_DEFAULT = 'hand-letter-pose';
 
 const INK = '#3f3270';
+// 펜 색: 편지지 아래 단추 사이의 동그라미로 고른다
+const INKS = ['#3f3270', '#2b2b2b', '#d9455f', '#3a6fd8', '#3a9a5b'];
 
 const TEXT = {
   ko: { dear: '오늘의 나에게', clear: '지우기', send: '보내기', tilt: '각도', move: '이동', font: '"Noto Sans KR", "Malgun Gothic", sans-serif' },
@@ -125,6 +127,7 @@ export class HandLetter {
     this.ink.width = IW; this.ink.height = IH;
     this.ictx = this.ink.getContext('2d');
     this.ictx.lineCap = this.ictx.lineJoin = 'round';
+    this.inkColor = INK;
     this.ictx.strokeStyle = INK;
     this.drawBase();
     this.tex = new THREE.CanvasTexture(this.base);
@@ -190,6 +193,20 @@ export class HandLetter {
       return { name, cv, tex, mesh, drawn: -1 };
     });
 
+    // 펜 색 고르기: 지우기·보내기 사이에 색 동그라미. 연필 끝이나 손끝(PC 는 마우스 누르기)으로 대면 그 색으로
+    this.swatches = INKS.map((color, k) => {
+      const mesh = new THREE.Mesh(new THREE.CircleGeometry(0.0105, 28),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false }));
+      mesh.position.set((k - (INKS.length - 1) / 2) * 0.028, -H / 2 - 0.05, 0.004);
+      mesh.renderOrder = 33;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.0125, 0.0148, 32),
+        new THREE.MeshBasicMaterial({ color: '#8a74d0', transparent: true, opacity: 0, depthWrite: false }));
+      ring.renderOrder = 33;
+      mesh.add(ring);
+      this.paper.add(mesh);
+      return { color, mesh, ring };
+    });
+
     // 연필 끝 자리 고리 (종이에 닿기 전)
     this.cursor = new THREE.Mesh(
       new THREE.RingGeometry(0.004, 0.006, 24),
@@ -207,8 +224,8 @@ export class HandLetter {
     const wood = new THREE.Mesh(new THREE.CylinderGeometry(0.0012, 0.0045, 0.018, 6),
       new THREE.MeshStandardMaterial({ color: '#f1dcc0', roughness: 0.8 }));
     wood.position.y = PENCIL_LEN / 2 - 0.013;
-    const lead = new THREE.Mesh(new THREE.ConeGeometry(0.0012, 0.004, 6),
-      new THREE.MeshStandardMaterial({ color: '#3f3270', roughness: 0.4 }));
+    this.leadMat = new THREE.MeshStandardMaterial({ color: INK, roughness: 0.4 });
+    const lead = new THREE.Mesh(new THREE.ConeGeometry(0.0012, 0.004, 6), this.leadMat);
     lead.position.y = PENCIL_LEN / 2 - 0.002;
     const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.0047, 0.0047, 0.012, 12),
       new THREE.MeshStandardMaterial({ color: '#f4b6c8', roughness: 0.6 }));
@@ -224,7 +241,6 @@ export class HandLetter {
     // 손잡이: 오른쪽 = 각도(부채꼴 그림), 아래 가운데 = 이동(상하좌우 화살표). 편지지와 함께 움직인다
     this.handles = [
       { kind: 'tilt', w: 0.075, h: 0.15, at: new THREE.Vector3(W / 2 + 0.055, 0.06, 0.004) },
-      { kind: 'move', w: 0.11, h: 0.075, at: new THREE.Vector3(0, -H / 2 - 0.055, 0.004) },
     ].map((hd) => {
       const cv = document.createElement('canvas');
       const vertical = hd.h > hd.w;
@@ -340,7 +356,6 @@ export class HandLetter {
         };
         let kind = null;
         if (nearHandle('tilt') || (q.x > W / 2 - 0.02 && q.x < W / 2 + 0.12 && q.y > -H / 2 + 0.12 && q.y < H / 2 + 0.03)) kind = 'tilt';
-        else if (nearHandle('move') || (Math.abs(q.x) < 0.1 && q.y < -H / 2 + 0.01 && q.y > -H / 2 - 0.12)) kind = 'move';
         if (kind) {
           const t0 = this.pose.tilt;
           // 각도: 아래 모서리(축)를 고정하고, 잡은 손이 축을 중심으로 돈 만큼 기울인다 (잡는 순간 튀지 않게 상대값)
@@ -496,6 +511,15 @@ export class HandLetter {
     this.inkAge = 0;
   }
 
+  setInk(color) {
+    this.inkColor = color;
+    this.ictx.strokeStyle = color;
+    this.leadMat.color.set(color);
+    this.cursor.material.color.set(color);
+    for (const w of this.swatches) w.ring.material.opacity = w.color === color ? this.alpha : 0;
+    this.onInk?.(color);
+  }
+
   drawButton(b) {
     const p = Math.min(1, this.press[b.name] / HOLD[b.name]);
     const key = Math.round(p * 40) + (b.name === 'send' && this.inked ? 100 : 0);
@@ -590,7 +614,7 @@ export class HandLetter {
             this.dirty = true;
           }
         } else {
-          g.beginPath(); g.arc(px, py, (w * IK) / 2, 0, Math.PI * 2); g.fillStyle = INK; g.fill();
+          g.beginPath(); g.arc(px, py, (w * IK) / 2, 0, Math.PI * 2); g.fillStyle = this.inkColor; g.fill();
           pen.last = { x: px, y: py };
           pen.lastMid = null;
           this.inked = true;
@@ -621,6 +645,15 @@ export class HandLetter {
         else this.send();
       }
       this.drawButton(b);
+    }
+    // 펜 색: 대는 순간 바로 바뀜
+    if (this.state === 'writing' && !this.adjust) {
+      for (const w of this.swatches) {
+        w.mesh.updateMatrixWorld();
+        const inv = _inv.copy(w.mesh.matrixWorld).invert();
+        const on = pokes.some((p) => { _l.copy(p).applyMatrix4(inv); return Math.hypot(_l.x, _l.y) < 0.014 && _l.z < 0.015 && _l.z > -0.03; });
+        if (on && w.color !== this.inkColor) this.setInk(w.color);
+      }
     }
     this.inkAge += dt;
     if (this.dirty && this.inkAge >= INK_UPLOAD) this.compose();
@@ -658,7 +691,19 @@ export class HandLetter {
     const hd = h.pad ? 'pad' : this.handedOf?.(i);
     const side = hd === 'pad' || hd === 'right' ? 1 : hd === 'left' ? -1 : (grip.clone().sub(h.knuckle).dot(z) < -0.004 ? -1 : 1);
     const palm = z.clone().multiplyScalar(side);
-    const tipDir = x.clone().multiplyScalar(0.55).addScaledVector(palm, 0.75).addScaledVector(y, -0.3).normalize();   // 앞·아래, 살짝 엄지 쪽
+    // 바른 쓰기 자세 (참고 사진): 연필은 엄지·검지 사이 홈(검지 마디 옆, 손등 쪽 살짝 위)에 기대고, 꼬집은 자리를 지나
+    // 끝이 손가락 끝보다 조금 앞·아래로 나온다. 컨트롤러는 마디가 없으니 예전처럼 정해진 방향
+    let tipDir = x.clone().multiplyScalar(0.55).addScaledVector(palm, 0.75).addScaledVector(y, -0.3).normalize();   // 앞·아래, 살짝 엄지 쪽
+    if (hd !== 'pad') {
+      const web = h.knuckle.clone().addScaledVector(y, -0.02).addScaledVector(palm, -0.015);   // 엄지·검지 사이 홈 위
+      const d = grip.clone().sub(web);
+      if (d.length() > 0.025) {
+        d.normalize();
+        // 너무 눕거나 손등 쪽으로 들리지 않게: 손바닥 쪽(아래) 성분이 조금은 있도록
+        if (d.dot(palm) < 0.25) d.addScaledVector(palm, 0.25 - d.dot(palm)).normalize();
+        tipDir = d;
+      }
+    }
     const tip = grip.clone().addScaledVector(tipDir, GRIP_TO_TIP);
     const center = tip.addScaledVector(tipDir, -PENCIL_LEN / 2);
     const q = new THREE.Quaternion().setFromUnitVectors(_Y, tipDir);   // 연필 +Y = 끝
@@ -741,6 +786,7 @@ export class HandLetter {
     this.shadow.material.opacity = a;
     this.inkMesh.material.opacity = a;
     for (const b of this.buttons) b.mesh.material.opacity = a;
+    for (const w of this.swatches) { w.mesh.material.opacity = a; w.ring.material.opacity = w.color === this.inkColor ? a : 0; }
     for (const hd of this.handles) hd.mesh.material.opacity = a;
     this.pencil.traverse((o) => { if (o.isMesh) o.material.opacity = a; });
   }
@@ -776,6 +822,7 @@ export class HandLetter {
     this.stand.material.opacity = Math.max(0, 0.9 - a * 2);    // 받침은 편지가 떠오르면 사라짐
     this.shadow.material.opacity = Math.max(0, 1 - a * 2);
     for (const btn of this.buttons) btn.mesh.material.opacity = Math.max(0, 1 - a * 2);
+    for (const w of this.swatches) { w.mesh.material.opacity = Math.max(0, 1 - a * 2); w.ring.material.opacity = w.color === this.inkColor ? w.mesh.material.opacity : 0; }
     for (const hd of this.handles) hd.mesh.material.opacity = Math.max(0, 1 - a * 2);
     // 연필은 제자리로 돌아가며 사라짐
     const k = Math.min(1, dt * 6);

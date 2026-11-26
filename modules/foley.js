@@ -146,6 +146,13 @@ export const Foley = {
     tone(c, d, t + 0.42, 95, 0.2, 0.45, 'sine', 50);
     burst(c, d, t + 0.42, [[0.004, 0.4], [0.08, 0.0001]], 'lowpass', 600, 0.7);
   }); },
+  // a hand slapping / swishing the basin water (찰박): a wet slap and a few bubbly drops
+  splash(p, k = 1) { play('splash', 0.09, c => {
+    const d = out(c, p, 0.6 + 0.6 * k), t = c.currentTime;
+    burst(c, d, t, [[0.004, 0.6], [0.05, 0.25], [0.18, 0.0001]], 'bandpass', R(900, 1400), 1.1, R(500, 700));
+    burst(c, d, t + 0.01, [[0.01, 0.3], [0.12, 0.0001]], 'highpass', 3000, 0.7);
+    for (let i = 0; i < 3 + Math.round(k * 3); i++) tone(c, d, t + R(0.03, 0.3), R(500, 1100), R(0.04, 0.08), 0.07, 'sine', R(1200, 2200));
+  }); },
   powder(p) { play('powder', 0.1, c => {
     const d = out(c, p, 0.8), t = c.currentTime;
     burst(c, d, t, [[0.04, 0.3], [0.25, 0.0001]], 'lowpass', 1800, 0.6, 500);
