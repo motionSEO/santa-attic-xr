@@ -79,6 +79,21 @@ export const RECIPES = {
   snowmanDreaming: { name: '스노우맨 드리밍', emotion: '포근함 · 휴식', naturals: ['lavender', 'cedarwood', 'coconutOil'], powder: '#f7f1e6', powderDesc: '우윳빛 마법 가루', shape: 'snowman', moldName: '눈사람 모양 틀', decor: { mode: 'sprinkle', label: '흰색 눈송이 장식', color: '#ffffff' } }
 };
 const POUNDS = 5;
+// Nicolas tells you what to do at each stage (his chalkboard bubble). Short lines, edit freely.
+export const STAGE_LINES = {
+  base:    '먼저 요정설탕과 별가루를 병째 기울여 절구에 부어주세요.',
+  naturals:'좋아요! 이제 레시피북의 자연재료를 하나씩 모아볼까요?',
+  pound:   '다 모였네요! 절굿공이로 콩콩, 다섯 번 빻아주세요.',
+  pour:    '고운 가루가 됐어요. 절구를 기울여 틀에 부어주세요.',
+  press:   '두 손으로 뚜껑을 꾸욱 눌러주세요!',
+  open:    '이제 뚜껑을 들어 올려볼까요? 두근두근!',
+  decorPlace: '장식을 집어서 배쓰밤 위에 올려주세요.',
+  decorSprinkle: '장식통을 기울여 배쓰밤 위에 솔솔 뿌려주세요.',
+  wrap:    '포장 테이블이 왔어요! 배쓰밤을 포장지 위에 올려요.',
+  wrapCover: '노란 손잡이를 잡고 포장지를 덮어주세요.',
+  letter:  '이름 모를 산타에게 편지를 써볼까요? 다 쓰면 보내기!',
+  basin:   '받은 선물을 수반 위에 놓아보세요.'
+};
 const LID_UP = 0.09;           // how high the mold lid hovers before the hands press it down
 const josa = (w, a, b) => { const c = w.charCodeAt(w.length - 1); return (c >= 0xac00 && c <= 0xd7a3 && (c - 0xac00) % 28) ? a : b; };
 
@@ -566,7 +581,7 @@ export class Flow {
       rolls.visible = true; this.root.updateMatrixWorld(true);
       const bb = new THREE.Box3().setFromObject(rolls), sz = bb.getSize(V());
       const piv = new THREE.Group(); this.root.add(piv); piv.position.copy(bb.getCenter(V())).setY(bb.min.y); piv.updateMatrixWorld(true); piv.attach(rolls);
-      if (sz.x > sz.z) piv.rotation.y = Math.PI / 2;                // rolls lie along the table
+      piv.rotation.y = (sz.x > sz.z ? Math.PI / 2 : 0) + Math.PI;  // rolls lie along the table, the open front toward the player
       piv.position.set(L.rolls.x, DESK_Y + 0.002, L.rolls.z + this.table2.position.z);   // the table waits behind the wall
       piv.updateMatrixWorld(true); this.table2.attach(rolls); piv.removeFromParent();
       this.conv.live(rolls); this.conv.clip(rolls);
@@ -595,6 +610,8 @@ export class Flow {
     if (this.garden) this.garden.onItemDrop = (it) => this.onHerbDrop(it);
     // VR: point at something out of reach and pinch -> drawers open, buttons press (herbs.js draws the hand ray)
     if (this.garden) { this.garden.rayTargets = () => this.clickables(); this.garden.onRayPick = (h, slot) => this.clickHit(h, slot); }
+    // VR: pointing and pinching only pulls things that fell on the room floor; everything else is taken by reaching for it
+    if (this.garden) this.garden.rayFilter = (o) => { const b = new THREE.Box3().setFromObject(o); return !b.isEmpty() && b.max.y < 0.45; };
     if (this.garden) { this.garden.blockers.push(this.pages.mesh); }
   }
 
@@ -786,9 +803,12 @@ export class Flow {
     const list = [];
     for (const p of this.panels) if (p.mesh.visible && p.mesh.parent) list.push(p.mesh);
     if (this.rb && this.s.step === 'emotion') list.push(...this.rb.pageMeshes);
-    for (const d of this.drawers) list.push(d.obj, d.tag);
-    if (this.lid && this.lid.visible) list.push(this.lid);
-    if (this.wrapHandle && this.wrapHandle.visible) list.push(this.wrapHandle);
+    // PC clicks drawers, the lid and the wrap handle; in VR those are done with the hands (no pointing from afar)
+    if (!this.renderer.xr.isPresenting) {
+      for (const d of this.drawers) list.push(d.obj, d.tag);
+      if (this.lid && this.lid.visible) list.push(this.lid);
+      if (this.wrapHandle && this.wrapHandle.visible) list.push(this.wrapHandle);
+    }
     if (this.recvBox && this.recvBox.visible && this.s.step === 'receive') list.push(this.recvBox);   // later it is grabbed, not clicked
     return list;
   }
@@ -839,12 +859,7 @@ export class Flow {
           if (!st[key]) { st[key] = true; const id = pnl.hitUV(uv); if (id) this.press(pnl, id); }
         } else if (!inside || lp.z > 0.03 || lp.z < -0.03) { st[key] = false; }
       }
-      // drawers: touch the front
-      for (const d of this.drawers) {
-        const near = f.p.distanceTo(wp(d.obj)) < 0.09 && f.p.x > d.c.x - 0.06;   // CONVEYOR: the cabinet faces the player (+x)
-        if (near && !st['d' + d.id]) { st['d' + d.id] = true; this.toggleDrawer(d); }
-        else if (!near && f.p.distanceTo(wp(d.obj)) > 0.14) st['d' + d.id] = false;
-      }
+      // (drawers: no touch-to-open any more; their knob is held and pulled, see drawers.js)
       // received gift: touch it
       if (this.recvBox?.visible && this.s.step === 'receive' && f.p.distanceTo(wp(this.recvBox, V(0, 0.05, 0))) < 0.12) this.takeGift();
       // wrap handle: pinch it and lay it over the bath bomb (or just touch it)
@@ -988,7 +1003,7 @@ export class Flow {
     const g = this.guide;
     if (!name) { g.visible = false; this.guideName = null; return; }
     if (name !== this.guideName) { this.guideName = name; g.play(name); g.userData.placed = false; }
-    g.visible = true;
+    g.visible = !!this.guideTarget();                                        // only ever over the thing to use, never in front of the view
   }
   // the thing the current motion is done with: the next bottle (or the mortar while a bottle is in hand), the next drawer,
   // the pestle (the mortar once it is in hand), the mold
@@ -997,18 +1012,19 @@ export class Flow {
     if (n === 'pour') { const held = Object.values(this.bottles).find(b => this.held(b)); return held ? this.mortar : (ING[next]?.location === 'shelf' ? this.bottles[next] : null); }
     if (n === 'grab') { const d = this.drawers.find(d => d.id === next); return d ? (d.ds?.parts?.find(p => /^Drawer_Knob/.test(p.o.name))?.o || d.tag) : null; }
     if (n === 'pound') return this.held(this.pestle) ? this.mortar : this.pestle;
+    if (n === 'grab' && this.drawers.find(d => d.id === next)?.item?.parent) return this.drawers.find(d => d.id === next).item;
     if (n === 'press') return this.mold;
     return null;
   }
   updateGuide(dt) {
-    const g = this.guide; if (!g?.visible) return;
+    const g = this.guide; if (!g || !this.guideName) return;
+    const t = this.guideTarget(); g.visible = !!(t && t.parent && t.visible !== false && !this.held(t));
+    if (!g.visible) return;
     g.update(dt);
-    const S = 0.6; g.scale.setScalar(S);
-    const t = this.guideTarget(); if (!t || !t.parent) { g.children.forEach(c => c.visible = false); return; }
-    g.children.forEach(c => c.visible = true);
-    // over the target: clear of its top and of the marker arrow bobbing above it
+    const S = 0.42; g.scale.setScalar(S);
+    // right over the target, just clear of the marker arrow bobbing above it
     const box = new THREE.Box3().setFromObject(t), c = box.getCenter(V());
-    const target = V(c.x, box.max.y + 0.2 + 0.27 * S / 2, c.z);
+    const target = V(c.x, box.max.y + 0.17 + 0.27 * S / 2, c.z);
     if (!g.userData.placed || g.position.distanceTo(target) > 0.6) { g.userData.placed = true; g.position.copy(target); }
     g.position.lerp(target, 1 - Math.exp(-dt * 5));
     const head = this.headPos(); g.lookAt(head.x, g.position.y + (head.y - g.position.y) * 0.5, head.z);
@@ -1277,6 +1293,7 @@ export class Flow {
     this.makeMold();
     this.setHint('03 재료 수집 · 공통 베이스', '작업대 오른쪽의 요정설탕과 별가루 병을 들고, 절구 위에서 병을 기울여 쏟아 넣어주세요. (PC: 병을 클릭한 채 절구 위로 끌어가 R 키를 누른 채 기울이기)');
     this.setMarkers([this.bottles[this.nextNeeded()]]);                     // one at a time, in recipe order
+    this.later(1.0, () => this.stageSay('base'));
   }
   needed() { const r = this.s.recipe; return r ? [...BASE, ...r.naturals] : []; }
   nextNeeded() { return this.needed().find(id => !this.s.done.has(id)); }
@@ -1376,7 +1393,7 @@ export class Flow {
   }
   toNaturals() {
     this.s.step = 'naturals';
-    this.toast('자연재료 수집이 열렸어요!');
+    this.later(0.8, () => this.stageSay('naturals'));
     this.naturalsHint();
   }
   naturalsHint() {
@@ -1404,13 +1421,25 @@ export class Flow {
     let over;
     if (byMouse) { const ray = this.mouseRay(); over = ray && ray.distanceToPoint(c) < z.r * 1.25; }
     else over = Math.hypot(p.x - c.x, p.z - c.z) < z.r && p.y > c.y - 0.04 && p.y < c.y + 0.4;
-    if (!over) return false;
-    if (!this.canAdd(it.herb)) return false;
+    if (!over || !this.canAdd(it.herb)) { this.vanishHerb(it); return true; }   // dropped on the floor / a table: it just disappears
     this.garden.items.splice(this.garden.items.indexOf(it), 1);
     const p0 = p.clone();
     this.tween(0.4, k => { it.mesh.position.copy(p0.clone().lerp(c, k)); it.mesh.scale.setScalar(1 - k * 0.8); }, () => it.mesh.removeFromParent());
     this.addToMortar(null, it.herb);                                         // (its rustle plays in addToMortar)
     return true;
+  }
+
+  vanishHerb(it) {
+    const g = this.garden; g.items.splice(g.items.indexOf(it), 1); g.falling = g.falling.filter(f => f.it !== it);
+    const m = it.mesh, s0 = m.scale.clone(), p0 = wp(m);
+    // it flutters down onto whatever is below (table or floor), then fades away
+    const r = new THREE.Raycaster(p0.clone().add(V(0, 0.01, 0)), V(0, -1, 0), 0, 3);
+    const hit = r.intersectObject(this.root, true).find(h => h.object.visible && !h.object.isPoints);
+    const p1 = V(p0.x, hit ? hit.point.y + 0.003 : 0.003, p0.z), dur = THREE.MathUtils.clamp(Math.sqrt(Math.max(0, p0.y - p1.y)) * 0.6, 0.15, 0.7);
+    this.tween(dur, k => { m.position.copy(m.parent.worldToLocal(p0.clone().lerp(p1, k * k))); m.rotation.z += 0.08; }, () => {
+      this.fx.emit(p1, { color: '#d9f2c8', count: 8, speed: 0.12, life: 0.5 });
+      this.tween(0.4, k => m.scale.copy(s0).multiplyScalar(Math.max(0.01, 1 - k)), () => m.removeFromParent());
+    });
   }
 
   // drawers
@@ -1422,21 +1451,34 @@ export class Flow {
       const from = d.obj.position.clone(), to = d.open ? d.p0.clone().add(d.delta) : d.p0.clone();
       this.tween(0.4, k => d.obj.position.lerpVectors(from, to, ease.inOut(k)));
     }
-    if (d.open && !(d.item && d.item.parent)) this.later(0.35, () => this.spawnDrawerItem(d));   // free play: an empty drawer always has one more (also after the making steps)
+    if (!d.ds && d.open && !(d.item && d.item.parent)) this.later(0.35, () => this.spawnDrawerItem(d));
   }
+  // the ingredient lies inside its drawer and rides with it: pull the drawer open by its knob, then take it out by hand
   spawnDrawerItem(d) {
     const id = d.id, it = this.make('ing_' + id, () => PH.stick(id));
-    const p = d.c.clone().add(V(0.17, 0.03, 0));    // CONVEYOR: out of the front of the cabinet, which faces the player (+x)
-    it.position.copy(this.group.worldToLocal(p.clone())); this.group.add(it);
     it.userData.ing = id; d.item = it;
     if (ING[id].action === 'break' || ING[id].action === 'tear') it.userData.breakable = true;
+    if (d.ds) {
+      const ds = this.drawerSet, front = d.obj; front.updateWorldMatrix(true, true);
+      const fb = new THREE.Box3().setFromObject(front), dir = ds.worldDir();
+      const sz = fb.getSize(V()), depth = Math.abs(sz.x * dir.x) + Math.abs(sz.y * dir.y) + Math.abs(sz.z * dir.z);
+      const p = fb.getCenter(V()).addScaledVector(dir, depth / 2 - 0.055); p.y = fb.max.y + 0.003;   // on the part that slides out (the drawer model is a solid block, so it lies on top of it)
+      this.group.add(it); it.position.copy(this.group.worldToLocal(p.clone()));
+      it.rotation.y = Math.atan2(-dir.z, dir.x) + Math.PI / 2;               // lies across the drawer
+      it.scale.setScalar(0.8); it.updateWorldMatrix(true, true);
+      d.ds.slot.attach(it); this.conv?.clip(it);
+      this.grab(it, { modes: ['pinch', 'fist'], reach: 0.05 });
+      it.userData.home = { pos: p.clone(), quat: it.getWorldQuaternion(new THREE.Quaternion()) };
+      it.userData.inDrawer = d;
+      return;
+    }
+    // no painted cabinet: the old way (flies out in front of the cabinet)
+    const p = d.c.clone().add(V(0.17, 0.03, 0));
+    it.position.copy(this.group.worldToLocal(p.clone())); this.group.add(it);
     this.grab(it, { modes: ['pinch', 'fist'], reach: 0.05 });
-    this.fx.emit(p, { color: ING[id].color, count: 20, speed: 0.2, life: 0.6 });
-    // the drawers are out of arm's reach: the ingredient flies over to float in front of the player
     const n = this.drawers.filter(x => x.item && x !== d).length, out = L.drawerOut.clone().add(V(0.07 * n, 0, 0));
     it.userData.home.pos = out.clone();
     this.tweenTo(it, out, null, 0.9, () => { if (!it.userData.holder) this.restBelow(it); });
-    this.toast(`${ING[id].name}${josa(ING[id].name, '이', '가')} 나왔어요 · ${ACT[ING[id].action]}`);
   }
 
   // break / tear (two hands in XR, Space on PC)
@@ -1489,7 +1531,7 @@ export class Flow {
   toPound() {
     this.s.step = 'pound'; this.s.pounds = 0;
     this.setHint('05 빻기', `절굿공이를 들고 절구를 ${POUNDS}번 콩콩 빻아 고운 가루로 만들어주세요. (PC: 절굿공이를 클릭한 채 Space)`);
-    this.setMarkers([this.pestle]); this.pages.redraw();
+    this.setMarkers([this.pestle]); this.pages.redraw(); this.stageSay('pound');
   }
   pound() {
     if (this.s.step !== 'pound') return this.toast('재료를 다 넣은 뒤에 빻아요');
@@ -1519,7 +1561,7 @@ export class Flow {
     this.s.step = 'pour';
     this.setGrabEnabled(this.mortar, true); this.forceRelease(this.pestle); this.goHome(this.pestle);
     this.setHint('06 틀에 붓기', '절구를 들고 왼쪽의 틀 위에서 기울여 가루를 부어주세요. (PC: 절구를 클릭한 채 틀 위로 끌어가 R 키를 누른 채)');
-    this.setMarkers([this.mortar]);
+    this.setMarkers([this.mortar]); this.stageSay('pour');
   }
   moldFilled() {
     this.s.step = 'press';
@@ -1530,7 +1572,7 @@ export class Flow {
     this.lid = this.make('moldLid', PH.lid); this.lid.position.copy(this.group.worldToLocal(wp(this.mold, V(0, LID_UP, 0)))); this.group.add(this.lid);
     this.lidPressT = 0;
     this.setHint('06 눌러 뭉치기', '틀 위에 손을 올리고 꾹 눌러 뚜껑을 닫아주세요. (PC: 뚜껑을 클릭하거나 Space)');
-    this.setMarkers([this.lid]);
+    this.setMarkers([this.lid]); this.stageSay('press');
   }
   lidClick() { if (this.s.step === 'press') this.closeLid(); else if (this.s.step === 'open') this.openLid(); }
   closeLid() {
@@ -1540,7 +1582,7 @@ export class Flow {
     this.tween(0.5, k => this.lid.position.lerpVectors(p0, p1, ease.inOut(k)), () => {
       this.fx.emit(wp(this.mold, V(0, 0.04, 0)), { color: '#ffffff', count: 30, speed: 0.4, life: 0.5 });
       this.s.step = 'open';
-      this.grab(this.lid, { modes: ['pinch', 'fist'], reach: 0.05 });
+      this.grab(this.lid, { modes: ['pinch', 'fist'], reach: 0.05 }); this.stageSay('open');
       this.setHint('06 틀 열기', '뚜껑 손잡이를 잡고 위로 들어 올려 틀을 열어보세요. 어떤 배쓰밤일까요? (PC: 뚜껑 클릭)');
     });
   }
@@ -1578,7 +1620,7 @@ export class Flow {
       this.sprinkleT = 0;
       this.setHint('07 최종 장식', `장식통을 들고 배쓰밤 위에서 기울여 ${d.label}${josa(d.label, '을', '를')} 뿌려주세요. (PC: R 키를 누른 채)`);
     }
-    this.setMarkers([this.decorObj]);
+    this.setMarkers([this.decorObj]); this.stageSay(d.mode === 'place' ? 'decorPlace' : 'decorSprinkle');
   }
   decorDone() {
     this.s.step = 'decorated';
@@ -1652,7 +1694,7 @@ export class Flow {
       const bomb = this.bomb;
       this.grab(bomb, { modes: ['pinch', 'fist'], reach: 0.05 }); bomb.userData.home = { pos: L.hold.clone(), quat: new THREE.Quaternion() };
       this.setHint('08 포장', '떠 있는 배쓰밤을 잡아 포장 테이블의 포장지 위에 올려주세요.');
-      this.setMarkers([bomb]);
+      this.setMarkers([bomb]); this.stageSay('wrap');
     });
   }
   wrapPlaced() {
@@ -1661,7 +1703,7 @@ export class Flow {
     this.tweenTo(this.bomb, wp(this.wrap, V(0, 0.003, 0)), new THREE.Quaternion(), 0.3);
     this.wrapHandle.visible = true;
     this.setHint('08 포장 · 감싸기', '포장지 앞쪽 끝(노란 손잡이)을 잡고 배쓰밤 위로 덮어주세요. 리본은 자동으로 묶여요. (PC: 노란 손잡이 클릭)');
-    this.setMarkers([this.wrapHandle]);
+    this.setMarkers([this.wrapHandle]); this.stageSay('wrapCover');
   }
   coverWrap() {
     if (this.s.step !== 'wrapCover') return;
@@ -1696,9 +1738,10 @@ export class Flow {
       hl.onBeforeSend = (png) => { this.letterImage = png; };
       hl.onSend = () => this.sfx('letter');
       hl.onDone = () => this.finishLetter();
+      hl.letter.handedOf = (i) => this.garden?.hands.find(s => s.hand === this.renderer.xr.getHand(i))?.handedness;   // pencil grip: which hand
     }
     this.letterImage = null;
-    this.handLetter.show();
+    this.handLetter.show(); this.stageSay('letter', 7);
     this.setHint('09 손편지', '편지지 옆의 연필을 집어(꼬집거나 쥐어서) 이름 모를 산타에게 편지를 써보세요. 다 쓰면 [보내기]를 잠시 누르고 있어요. 오른쪽 [각도], 아래 [이동] 손잡이로 편지지를 맞출 수 있어요. (PC: 종이 위에서 왼쪽 버튼을 누른 채 끌어서 쓰기)');
     this.setMarkers([]);
   }
@@ -1728,8 +1771,9 @@ export class Flow {
     const head = this.headPos(), m = B.panel.mesh, p = S.object.position;
     const face = S.parts?.head ? wp(S.parts.head) : V(p.x, p.y + 1.6, p.z);
     const toHead = V(head.x - face.x, 0, head.z - face.z).normalize(), right = V(toHead.z, 0, -toHead.x);
-    m.position.copy(face).addScaledVector(right, 0.28 + B.panel.w / 2).addScaledVector(toHead, 0.15); m.lookAt(head);
+    m.position.copy(face).addScaledVector(right, -(0.28 + B.panel.w / 2)).addScaledVector(toHead, 0.15); m.position.y += 0.1; m.lookAt(head);   // on his other side: the shelf and the motion guide are on the right
   }
+  stageSay(key, secs = 6) { const t = STAGE_LINES[key]; if (t) this.santaSay(t, secs); }
   santaWalk(to, opts = {}) {
     this.santaWalking = true;
     return this.santa.walkTo(to, { speed: 0.6, ...opts }).then(() => { this.santaWalking = false; return this.santa.turnTo(this.headPos(), 0.6); });
@@ -1806,7 +1850,7 @@ export class Flow {
         this.s.step = 'basin';
         this.grab(box, { modes: ['pinch', 'fist'], reach: 0.06 }); box.userData.home = { pos: L.hold.clone(), quat: new THREE.Quaternion() };
         this.setHint('12 수반', '선물 상자를 잡아 수반 위에서 놓아주세요. 포장이 풀리고 배쓰밤이 물에 녹아요.');
-        this.setMarkers([box, { obj: this.basin, off: V(0, 0.16, 0) }]);
+        this.setMarkers([box, { obj: this.basin, off: V(0, 0.16, 0) }]); this.stageSay('basin');
       });
     });
   }
@@ -1945,6 +1989,7 @@ export class Flow {
     if (o === this.fruits.bergamot || o === this.fruits.lemon) { if (this.board.userData.item === o) this.board.userData.item = null; }
     if (o.userData.onBoard) { o.userData.onBoard = false; if (this.board.userData.item === o) this.board.userData.item = null; }
     const d = this.drawers.find(x => x.item === o); if (d) this.unfloat(o);
+    o.userData.inDrawer = null;                                              // taken out of its drawer
   }
   // the sound of picking it up: glass + liquid, rustle, wood, fruit, stone, metal
   grabSound(o) {
@@ -2051,6 +2096,10 @@ export class Flow {
     for (const x of [...this.timers]) { x.t -= dt; if (x.t <= 0) { this.timers.splice(this.timers.indexOf(x), 1); x.fn(); } }
     for (const x of [...this.tweens]) { x.t += dt; const k = Math.min(1, x.t / x.dur); x.upd(k); if (k >= 1) { this.tweens.splice(this.tweens.indexOf(x), 1); x.done?.(); } }
     this.conv?.update(dt);
+    for (const d of this.drawers) {
+      if (d.ds && d.ds.t > 0.55 && !(d.item && d.item.parent)) this.spawnDrawerItem(d);   // an open drawer holds its ingredient
+      if (d.item?.userData.inDrawer) d.item.visible = d.ds.t > 0.45;                    // tucked away while the drawer is shut
+    }
     this.updateSanta(dt);
     this.updateBubble(dt);
     // follow the view
@@ -2065,7 +2114,7 @@ export class Flow {
       const cur = wp(f.obj); cur.lerp(target, a); f.obj.position.copy(f.obj.parent.worldToLocal(cur));
       if (f.face !== false) {
         const q1 = vq.clone();
-        if (f.tiltBook) q1.multiply(new THREE.Quaternion().setFromAxisAngle(V(1, 0, 0), Math.PI / 2));   // book: pages (local +Y) face the reader
+        if (f.tiltBook) q1.multiply(new THREE.Quaternion().setFromAxisAngle(V(1, 0, 0), Math.PI / 2 - BOOK_TILT));   // book: pages (local +Y) face the reader, leaning back 30° like on a stand
         q1.premultiply(f.obj.parent.getWorldQuaternion(new THREE.Quaternion()).invert());
         f.obj.quaternion.slerp(q1, a);
       }
@@ -2081,7 +2130,11 @@ export class Flow {
       m.obj.visible = true; m.obj.position.copy(wp(m.target)).add(m.rel); m.obj.update(dt, this.camera);
     }
     this.updateGuide(dt);
-    if (this.rb) { this.rb.update(dt); this.syncBookQuests(); }
+    if (this.rb) {
+      this.rb.update(dt); this.syncBookQuests();
+      const closed = this.rb.snapshot.state === 'closed';                    // shut book: the inner pages are not drawn (they broke through the cover)
+      if (closed !== this.rbShut) { this.rbShut = closed; for (const m of this.rb.pageMeshes) m.visible = !closed; }
+    }
     this.hint.mesh.visible = false;                                       // the old floating explanation panel is not shown
     this.pullFromFloor();
 

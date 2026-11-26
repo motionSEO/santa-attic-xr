@@ -18,7 +18,7 @@
 //   편지는 저장·전송하지 않는다. 필요하면 getImage() 로 PNG 를 직접 받아 쓰면 된다.
 import * as THREE from 'three';
 
-const W = 0.66, H = 0.46;               // 편지지 크기(m) — 큰 창처럼
+const W = 0.4, H = 0.28;                // 편지지 크기(m) — VR 테스트 후 줄임 (0.66 x 0.46 → 0.5 x 0.35 → 0.4 x 0.28)
 // 종이 캔버스: 시야 70°가 넘는 큰 종이라 2048px 로 그려야 퀘스트에서 글자·획이 깨지지 않는다
 const S = 2;
 const CW = 1024 * S, CH = Math.round(CW * H / W);
@@ -224,7 +224,7 @@ export class HandLetter {
     // 손잡이: 오른쪽 = 각도(부채꼴 그림), 아래 가운데 = 이동(상하좌우 화살표). 편지지와 함께 움직인다
     this.handles = [
       { kind: 'tilt', w: 0.075, h: 0.15, at: new THREE.Vector3(W / 2 + 0.055, 0.06, 0.004) },
-      { kind: 'move', w: 0.15, h: 0.075, at: new THREE.Vector3(0, -H / 2 - 0.055, 0.004) },
+      { kind: 'move', w: 0.11, h: 0.075, at: new THREE.Vector3(0, -H / 2 - 0.055, 0.004) },
     ].map((hd) => {
       const cv = document.createElement('canvas');
       const vertical = hd.h > hd.w;
@@ -340,7 +340,7 @@ export class HandLetter {
         };
         let kind = null;
         if (nearHandle('tilt') || (q.x > W / 2 - 0.02 && q.x < W / 2 + 0.12 && q.y > -H / 2 + 0.12 && q.y < H / 2 + 0.03)) kind = 'tilt';
-        else if (nearHandle('move') || (Math.abs(q.x) < 0.16 && q.y < -H / 2 + 0.01 && q.y > -H / 2 - 0.12)) kind = 'move';
+        else if (nearHandle('move') || (Math.abs(q.x) < 0.1 && q.y < -H / 2 + 0.01 && q.y > -H / 2 - 0.12)) kind = 'move';
         if (kind) {
           const t0 = this.pose.tilt;
           // 각도: 아래 모서리(축)를 고정하고, 잡은 손이 축을 중심으로 돈 만큼 기울인다 (잡는 순간 튀지 않게 상대값)
@@ -654,7 +654,9 @@ export class HandLetter {
     frame.extractBasis(x, y, z);                       // x: 손목→검지 마디(앞), y: 새끼 쪽, z: 손바닥 또는 손등 쪽
     const grip = this.gripPoint(h, i);
     // z 가 손바닥 쪽인지: 꼬집은 점은 손바닥 쪽에 있다 (컨트롤러는 z 가 아래 = 손바닥 쪽)
-    const side = grip.clone().sub(h.knuckle).dot(z) < -0.004 ? -1 : 1;
+    // 손: 오른손이면 z 가 손바닥 쪽, 왼손이면 손등 쪽 (handedOf 로 알려 줌). 모르면 꼬집은 점이 있는 쪽. 컨트롤러는 z = 아래 = 손바닥 쪽
+    const hd = h.pad ? 'pad' : this.handedOf?.(i);
+    const side = hd === 'pad' || hd === 'right' ? 1 : hd === 'left' ? -1 : (grip.clone().sub(h.knuckle).dot(z) < -0.004 ? -1 : 1);
     const palm = z.clone().multiplyScalar(side);
     const tipDir = x.clone().multiplyScalar(0.55).addScaledVector(palm, 0.75).addScaledVector(y, -0.3).normalize();   // 앞·아래, 살짝 엄지 쪽
     const tip = grip.clone().addScaledVector(tipDir, GRIP_TO_TIP);
@@ -702,7 +704,7 @@ export class HandLetter {
           this.pencil.updateMatrixWorld();
           // 잡는 순간 바른 쓰기 자세로 손에 쥐여 준다 (잡은 위치·각도 그대로가 아니라): 엄지·검지 사이에 끼고,
           // 끝은 손가락 앞쪽 아래(손바닥 쪽)로, 윗부분은 엄지와 검지 사이 홈을 지나 손목 쪽 위로
-          this.gripOffset = (this.gripOffset ?? new THREE.Matrix4()).copy(_hf).invert().multiply(this.writingPose(h, i, _hf));
+          this.gripOffset = (this.gripOffset ?? new THREE.Matrix4()).copy(_hf).invert().multiply(h.mouse ? this.pencil.matrixWorld : this.writingPose(h, i, _hf));   // PC: the mouse hand already holds it the right way (mouseGrab)
         }
       });
     }
@@ -910,7 +912,7 @@ export function createHandLetter(o) {
     d.pinky.copy(d.knuckle).addScaledVector(_px, 0.05);
     d.index.copy(at).addScaledVector(_pz, -0.07);                 // 단추는 컨트롤러 앞끝으로 누른다
     d.thumb.copy(d.index).addScaledVector(_py, c.trigger ? 0 : 0.06);
-    d.curl = c.squeeze ? 1 : 0;
+    d.curl = c.squeeze ? 1 : 0; d.pad = true;
     return d;
   }
 
@@ -934,7 +936,7 @@ export function createHandLetter(o) {
   //   마우스가 가리키는 종이 위 지점에 연필 끝이 오도록 손을 옮긴다.
   //   누르면 연필 끝이 종이에 닿고(써짐), 떼면 2cm 떨어진다. 단추도 누르고 있으면 눌린다.
   const M = o.mouse !== false ? {
-    hand: { thumb: new THREE.Vector3(), index: new THREE.Vector3(), knuckle: new THREE.Vector3(), wrist: new THREE.Vector3(), pinky: new THREE.Vector3(), curl: 0 },
+    hand: { thumb: new THREE.Vector3(), index: new THREE.Vector3(), knuckle: new THREE.Vector3(), wrist: new THREE.Vector3(), pinky: new THREE.Vector3(), curl: 0, mouse: true },
     c: new THREE.Vector3(), n: new THREE.Vector3(), up: new THREE.Vector3(), right: new THREE.Vector3(),
     grip: new THREE.Vector3(), tipOff: new THREE.Vector3(), target: new THREE.Vector3(), hit: new THREE.Vector3(),
     ray: new THREE.Raycaster(), ndc: new THREE.Vector2(), plane: new THREE.Plane(),

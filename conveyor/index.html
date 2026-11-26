@@ -314,7 +314,15 @@ const locked = () => document.pointerLockElement === el;
 // PC: no pointer lock. The cursor stays free: right-drag looks around, left click interacts where the cursor is.
 // title screen: only the 시작하기 button starts the game (it turns on once the room and the flow are ready)
 const startBtn = document.getElementById('startBtn');
-startBtn.addEventListener('click', () => { if (!window.__flow) return; document.body.classList.add('started'); window.__flow.begin(); });
+// 시작하기 = straight into VR when the device can (the flow begins on 'sessionstart'); otherwise the game starts on the page
+let vrOK = false; try { navigator.xr?.isSessionSupported('immersive-vr').then(ok => { vrOK = ok; }).catch(() => {}); } catch (e) {}
+startBtn.addEventListener('click', () => {
+  if (!window.__flow) return;
+  document.body.classList.add('started');
+  const vb = document.getElementById('VRButton');
+  if (vrOK && vb && !renderer.xr.isPresenting) { vb.click(); return; }   // same click = the user gesture the headset needs
+  window.__flow.begin();
+});
 const startReady = setInterval(() => { if (window.__flow) { clearInterval(startReady); startBtn.disabled = false; startBtn.textContent = '시작하기'; } }, 300);
 document.addEventListener('pointerlockchange', () => document.body.classList.toggle('locked', locked()));
 document.addEventListener('mousemove', e => {
